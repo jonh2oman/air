@@ -160,6 +160,124 @@ class SoundManager {
       // ignore
     }
   }
+
+  public playPttDown() {
+    if (!this.enabled) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      // High-pitched mic switch transient click + brief squelch burst
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(2400, now);
+      osc.frequency.exponentialRampToValueAtTime(400, now + 0.035);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.035);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.035);
+    } catch {
+      // ignore
+    }
+  }
+
+  public playPttUp() {
+    if (!this.enabled) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      // Squelch tail / release click
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1400, now);
+      osc.frequency.exponentialRampToValueAtTime(200, now + 0.04);
+      gain.gain.setValueAtTime(0.18, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.04);
+    } catch {
+      // ignore
+    }
+  }
+
+  public playMorseTone(freq: number = 750, durationSec: number = 0.08) {
+    if (!this.enabled) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.setValueAtTime(0.12, now + durationSec - 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + durationSec);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + durationSec);
+    } catch {
+      // ignore
+    }
+  }
+
+  public playBuzzer() {
+    if (!this.enabled) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(180, now);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.25);
+    } catch {
+      // ignore
+    }
+  }
+
+  public speak(text: string, onEnd?: () => void) {
+    if (!this.enabled || typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      onEnd?.();
+      return;
+    }
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 0.95; // Slightly measured cadence for ATC / ATIS radio
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+      utterance.onend = () => {
+        onEnd?.();
+      };
+      utterance.onerror = () => {
+        onEnd?.();
+      };
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      onEnd?.();
+    }
+  }
+
+  public stopSpeaking() {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  }
 }
 
 export const soundManager = new SoundManager();

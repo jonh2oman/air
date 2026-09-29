@@ -3,6 +3,7 @@ export type NavModule =
   | 'flight-controls'
   | 'instruments'
   | 'circuit-radio'
+  | 'radio-comms'
   | 'weight-balance'
   | 'navigation-e6b'
   | 'flight-sim'

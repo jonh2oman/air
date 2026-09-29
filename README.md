@@ -7,7 +7,8 @@ An interactive aviation ground school web application designed for Royal Canadia
 - **Virtual Wind Tunnel & Aerodynamics Lab**: Angle of attack, Bernoulli lift vs drag vectors, camber, and stall dynamics.
 - **Flight Controls 3D**: Primary control surfaces (ailerons, elevator, rudder) and axis of rotation visualizations.
 - **Six-Pack Cockpit Trainer**: Gyroscopic and pitot-static flight instruments (Airspeed, Attitude, Altimeter, Turn Coordinator, Heading, Vertical Speed).
-- **Airport Circuit & Radio Lab**: Standard circuit patterns (upwind, crosswind, downwind, base, final) and radio callouts.
+- **Airport Circuit & Pattern Lab**: Standard circuit patterns (upwind, crosswind, downwind, base, final) and light gun signals.
+- **Radio Comms & Phonetics (EO M129.01)**: Standard NATO/ICAO phonetic alphabet and numbers, custom callsign & name speller, avionics VHF radio stack with real-time NOAA Gander (CYQX) ATIS, animated tactile PTT trigger, and interactive Canadian ATC phraseology game.
 - **Weight & Balance Lab**: Centre of gravity envelope calculations, arm, moments, and fuel burn adjustments.
 - **Flight Computer (E6B)**: Wind correction angle, ground speed, crosswind components, and true airspeed computations.
 - **3D Flight Simulator**: Interactive Three.js cockpit and flight simulation.

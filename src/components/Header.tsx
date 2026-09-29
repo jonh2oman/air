@@ -8,6 +8,7 @@ import {
   Trophy, 
   Plane,
   Radio,
+  Mic,
   Volume2,
   VolumeX
 } from 'lucide-react';
@@ -31,11 +32,12 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'aerodynamics', num: 1, label: 'Wind Tunnel', fullTitle: '1. Virtual Wind Tunnel & Aerodynamics', icon: <Wind className="w-3.5 h-3.5" /> },
     { id: 'flight-controls', num: 2, label: '3D Controls', fullTitle: '2. 3D Aircraft Primary Controls', icon: <Rotate3d className="w-3.5 h-3.5" /> },
     { id: 'instruments', num: 3, label: 'Six-Pack', fullTitle: '3. Cockpit Six-Pack Flight Instruments', icon: <Gauge className="w-3.5 h-3.5" /> },
-    { id: 'circuit-radio', num: 4, label: 'Circuit & Radio', fullTitle: '4. Airport Circuit Pattern & Light Gun Signals', icon: <Radio className="w-3.5 h-3.5" /> },
-    { id: 'weight-balance', num: 5, label: 'Weight & Bal', fullTitle: '5. Weight & Balance Loading Lab', icon: <Scale className="w-3.5 h-3.5" /> },
-    { id: 'navigation-e6b', num: 6, label: 'E6B Computer', fullTitle: '6. E6B Flight Computer & Weather Calculator', icon: <Compass className="w-3.5 h-3.5" /> },
-    { id: 'flight-sim', num: 7, label: 'Flight Sim', fullTitle: '7. 3D Interactive Flight Simulator', icon: <Plane className="w-3.5 h-3.5" /> },
-    { id: 'cadet-exam', num: 8, label: 'Wings Exam', fullTitle: '8. Cadet Wings Challenge & PSTAR Exam', icon: <Trophy className="w-3.5 h-3.5" /> },
+    { id: 'circuit-radio', num: 4, label: 'Circuit Pattern', fullTitle: '4. Airport Circuit Pattern & Light Gun Signals', icon: <Radio className="w-3.5 h-3.5" /> },
+    { id: 'radio-comms', num: 5, label: 'Radio Comms', fullTitle: '5. Radio Comms, Phonetics & CYQX ATIS (EO M129.01)', icon: <Mic className="w-3.5 h-3.5" /> },
+    { id: 'weight-balance', num: 6, label: 'Weight & Bal', fullTitle: '6. Weight & Balance Loading Lab', icon: <Scale className="w-3.5 h-3.5" /> },
+    { id: 'navigation-e6b', num: 7, label: 'E6B Computer', fullTitle: '7. E6B Flight Computer & Weather Calculator', icon: <Compass className="w-3.5 h-3.5" /> },
+    { id: 'flight-sim', num: 8, label: 'Flight Sim', fullTitle: '8. 3D Interactive Flight Simulator', icon: <Plane className="w-3.5 h-3.5" /> },
+    { id: 'cadet-exam', num: 9, label: 'Wings Exam', fullTitle: '9. Cadet Wings Challenge & PSTAR Exam', icon: <Trophy className="w-3.5 h-3.5" /> },
   ];
 
   return (
@@ -90,8 +92,8 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Navigation Tabs - Responsive Grid fitting all buttons on screen without scrolling */}
-        <nav className="grid grid-cols-4 md:grid-cols-8 gap-1.5 sm:gap-2 py-2.5 w-full">
+        {/* Navigation Tabs - Responsive Grid fitting all 9 buttons on screen without scrolling */}
+        <nav className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-9 gap-1.5 sm:gap-2 py-2.5 w-full">
           {navItems.map((item) => {
             const isActive = currentModule === item.id;
             return (

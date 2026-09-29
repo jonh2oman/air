@@ -7,6 +7,7 @@ import { SixPackCockpit } from './components/SixPackCockpit';
 import { WeightBalanceLab } from './components/WeightBalanceLab';
 import { FlightComputerE6B } from './components/FlightComputerE6B';
 import { AirportCircuitLab } from './components/AirportCircuitLab';
+import { RadioCommsLab } from './components/RadioCommsLab';
 import { FlightSimulator3D } from './components/FlightSimulator3D';
 import { CadetExamChallenge } from './components/CadetExamChallenge';
 import { soundManager } from './utils/audio';
@@ -37,6 +38,7 @@ export const App: React.FC = () => {
         {currentModule === 'flight-controls' && <FlightControls3D />}
         {currentModule === 'instruments' && <SixPackCockpit />}
         {currentModule === 'circuit-radio' && <AirportCircuitLab />}
+        {currentModule === 'radio-comms' && <RadioCommsLab />}
         {currentModule === 'weight-balance' && <WeightBalanceLab />}
         {currentModule === 'navigation-e6b' && <FlightComputerE6B />}
         {currentModule === 'flight-sim' && <FlightSimulator3D />}
