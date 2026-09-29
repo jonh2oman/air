@@ -104,11 +104,14 @@ export const WeightBalanceLab: React.FC = () => {
   const isOverweight = totalWeight > profile.maxGrossWeight;
   const isForwardCg = calculatedCg < profile.forwardCgLimit;
   const isAftCg = calculatedCg > profile.aftCgLimit;
-  const isCgSafe = !isOverweight && !isForwardCg && !isAftCg;
 
   // Glider solo pilot minimum weight check (SGS 2-33A rule)
   const isSoloGlider = selectedAircraft === 'glider' && (weights.rearPilot || 0) === 0;
   const needsBallastGlider = isSoloGlider && ((weights.frontPilot || 0) + (weights.removableBallast || 0) < 154);
+
+  // A practice result is only "within limits" when weight, CG envelope AND
+  // any required ballast are all satisfied.
+  const isCgSafe = !isOverweight && !isForwardCg && !isAftCg && !needsBallastGlider;
 
   return (
     <div className="space-y-6">
@@ -298,7 +301,7 @@ export const WeightBalanceLab: React.FC = () => {
                 <AlertTriangle className="w-6 h-6 text-rose-400 flex-shrink-0 animate-bounce" />
               )}
               <h3 className="font-bold text-base">
-                {isCgSafe ? 'WEIGHT & BALANCE APPROVED' : 'OUT OF LIMITS — UNSAFE FOR FLIGHT'}
+                {isCgSafe ? 'PRACTICE RESULT: WITHIN LIMITS' : 'PRACTICE RESULT: OUT OF LIMITS'}
               </h3>
             </div>
 
@@ -316,6 +319,10 @@ export const WeightBalanceLab: React.FC = () => {
                 </strong>
               </div>
             </div>
+
+            <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+              Practice result only — figures here are illustrative. Always compute from the aircraft's actual weight-and-balance report, flight manual, and cockpit placards.
+            </p>
 
             {/* Warning Details */}
             {isOverweight && (
@@ -395,10 +402,10 @@ export const WeightBalanceLab: React.FC = () => {
                         {profile.aftCgLimit}"
                       </text>
 
-                      {/* Current Aircraft Point */}
+                      {/* Current Aircraft Point (unclamped: shows the true position, even when out of bounds) */}
                       <circle
-                        cx={Math.max(40, Math.min(260, currentX))}
-                        cy={Math.max(20, Math.min(170, currentY))}
+                        cx={currentX}
+                        cy={currentY}
                         r="6"
                         fill={isCgSafe ? '#38bdf8' : '#ef4444'}
                         stroke="#ffffff"
@@ -420,6 +427,9 @@ export const WeightBalanceLab: React.FC = () => {
             </div>
             <p className="text-[11px] text-slate-400 mt-2 text-center">
               The blue dot shows your current load. Keep it centered within the green polygon!
+            </p>
+            <p className="text-[10px] text-slate-500 mt-1 text-center">
+              Illustrative envelope only — real CG limits are weight- and model-dependent, and glider ballast requirements come from the flight manual. Use the aircraft flight manual, current weight-and-balance report, and cockpit placards for real loading.
             </p>
           </div>
         </div>

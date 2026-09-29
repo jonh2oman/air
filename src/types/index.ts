@@ -31,18 +31,29 @@ export interface ControlSurfacesState {
 }
 
 export interface InstrumentState {
+  // --- INDICATED values: what the dials show (affected by pitot-static faults) ---
   indicatedAirspeed: number; // KIAS
-  pitchAngle: number; // degrees (-30 to +30)
-  bankAngle: number; // degrees (-60 to +60)
   altitude: number; // feet (0 to 15000)
   verticalSpeed: number; // fpm (-2000 to +2000)
+  // --- TRUE values: what the aircraft is actually doing (faults never change these) ---
+  trueAirspeed: number; // KTAS-ish model speed
+  trueAltitude: number; // feet
+  trueVsi: number; // fpm
+  pitchAngle: number; // degrees (-30 to +30)
+  bankAngle: number; // degrees (-60 to +60)
   heading: number; // degrees (0 to 359)
   altimeterSetting: number; // inHg (e.g. 29.92)
   headingBug: number; // degrees
   engineRpm: number;
   flapSetting: number; // 0, 10, 20, 30, 40
-  pitotBlocked: boolean;
+  // --- Pitot-static faults ---
+  // 'none' | 'ram' (ram blocked, drain open → ASI falls to zero)
+  //        | 'ram-drain' (ram + drain blocked → trapped pitot pressure, ASI acts as altimeter)
+  pitotFault: 'none' | 'ram' | 'ram-drain';
   staticBlocked: boolean;
+  // References captured at the moment a fault is introduced
+  blockRefAlt: number | null; // true altitude when static blocked or ram+drain blocked
+  blockRefIas: number | null; // true airspeed when ram+drain blocked
   turnRate: number; // degrees/sec
   slipSkid: number; // -1 to +1 (ball position)
 }

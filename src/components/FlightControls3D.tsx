@@ -36,6 +36,11 @@ export const FlightControls3D: React.FC = () => {
   const [skyTheme, setSkyTheme] = useState<SkyTheme>('day');
   const [isLoading, setIsLoading] = useState(true);
   const [loadingProgress, setLoadingProgress] = useState(0);
+  const [modelError, setModelError] = useState<string | null>(null);
+  // Mirrors for values read inside the Three.js animation loop (the scene
+  // effect must not be rebuilt every time a slider moves)
+  const engineRpmRef = useRef(engineRpm);
+  engineRpmRef.current = engineRpm;
 
   const [isDraggingStick, setIsDraggingStick] = useState(false);
   const stickPadRef = useRef<HTMLDivElement | null>(null);
@@ -304,8 +309,13 @@ export const FlightControls3D: React.FC = () => {
 
     axesGroup.visible = showAxes;
 
-    // Load glTF 3D Model
-    const modelPath = controls.aircraftModel === 'glider' ? '/glider.glb' : '/c172.glb';
+    // Load glTF 3D Model — served relative to the app's base path so it also
+    // resolves under GitHub Pages (e.g. /air/glider.glb), not just domain root.
+    const base = import.meta.env.BASE_URL || '/';
+    const modelPath = `${base}${controls.aircraftModel === 'glider' ? 'glider.glb' : 'c172.glb'}`;
+    setIsLoading(true);
+    setLoadingProgress(0);
+    setModelError(null);
     const loader = new GLTFLoader();
 
     sceneRef.current = {
@@ -439,6 +449,9 @@ export const FlightControls3D: React.FC = () => {
       (err) => {
         console.error('Error loading glTF aircraft:', err);
         setIsLoading(false);
+        setModelError(
+          `Could not load the 3D model (${modelPath}). Check that the .glb file is deployed alongside the app, then reload.`
+        );
       }
     );
 
@@ -503,8 +516,8 @@ export const FlightControls3D: React.FC = () => {
       } = sceneRef.current;
       const delta = clock.getDelta();
 
-      // Drifting 3D clouds
-      const driftSpeed = (controls.aircraftModel === 'glider' ? 45 : engineRpm / 35) * 0.04;
+      // Drifting 3D clouds (engine RPM read via ref — the loop outlives renders)
+      const driftSpeed = (controls.aircraftModel === 'glider' ? 45 : engineRpmRef.current / 35) * 0.04;
       cloudsGroup.children.forEach((cloud) => {
         cloud.position.z += driftSpeed * delta * 5.0;
         if (cloud.position.z > 55) {
@@ -530,6 +543,23 @@ export const FlightControls3D: React.FC = () => {
       window.removeEventListener('mouseup', onMouseUp);
       dom.removeEventListener('mousedown', onMouseDown);
       dom.removeEventListener('wheel', onWheel);
+      // Dispose the loaded model: geometries, materials and textures, so
+      // switching aircraft (or unmounting) doesn't leak GPU memory.
+      if (sceneRef.current?.loadedModel) {
+        sceneRef.current.loadedModel.traverse((obj) => {
+          const mesh = obj as THREE.Mesh;
+          if (mesh.isMesh) {
+            mesh.geometry?.dispose();
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            mats.forEach((m) => {
+              const mat = m as THREE.MeshStandardMaterial;
+              if (mat.map) mat.map.dispose();
+              if (mat.normalMap) mat.normalMap.dispose();
+              mat.dispose();
+            });
+          }
+        });
+      }
       renderer.dispose();
       if (canvasMountRef.current && renderer.domElement.parentNode === canvasMountRef.current) {
         canvasMountRef.current.removeChild(renderer.domElement);
@@ -585,12 +615,12 @@ export const FlightControls3D: React.FC = () => {
       speedbrakeRNode
     } = sceneRef.current;
 
-    // 1. Deflect Elevator: Pull stick back (pitch < 0) -> elevator deflects UP (+Y)
+    // 1. Deflect Elevator: Pull stick back (pitch > 0, positive = nose-up) -> elevator trailing edge deflects UP (+Y)
     rotateAroundHinge(
       elevatorNode,
       new THREE.Vector3(0.2917, -0.007, 0),
       new THREE.Vector3(0, 0, 1),
-      -controls.pitch * 0.45
+      controls.pitch * 0.45
     );
 
     // 2. Deflect Rudder: Right rudder (yaw > 0) -> rudder deflects RIGHT (+X)
@@ -624,8 +654,8 @@ export const FlightControls3D: React.FC = () => {
     }
 
     // 5. Aircraft attitude rotation along the primary axes (natural response)
-    // Pull back stick (pitch < 0) -> nose pitches UP
-    aircraftContainer.rotation.x = -controls.pitch * 0.28; // Lateral / Pitch
+    // Pull back stick (pitch > 0, positive = nose-up) -> nose pitches UP
+    aircraftContainer.rotation.x = controls.pitch * 0.28; // Lateral / Pitch
     // Stick right (roll > 0) -> banks right
     aircraftContainer.rotation.z = -controls.roll * 0.38;  // Longitudinal / Roll
     // Right rudder (yaw > 0) -> yaws right
@@ -649,7 +679,8 @@ export const FlightControls3D: React.FC = () => {
     const dy = Math.max(-maxRadius, Math.min(maxRadius, e.clientY - centerY));
 
     const rollNorm = dx / maxRadius;
-    const pitchNorm = -dy / maxRadius;
+    // Pull the stick DOWN toward you (dy > 0) = nose UP, so positive pitch = nose-up everywhere
+    const pitchNorm = dy / maxRadius;
 
     setControls((prev) => ({
       ...prev,
@@ -884,6 +915,20 @@ export const FlightControls3D: React.FC = () => {
               </div>
             )}
 
+            {/* Model Load Failure */}
+            {!isLoading && modelError && (
+              <div className="absolute inset-0 z-20 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center space-y-3 p-6 text-center">
+                <p className="text-rose-400 font-bold">⚠ 3D Model Failed to Load</p>
+                <p className="text-xs text-slate-400 font-mono max-w-md">{modelError}</p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="px-4 py-2 bg-rcac-sky text-slate-950 text-sm font-bold rounded-lg hover:bg-sky-400 transition"
+                >
+                  Reload
+                </button>
+              </div>
+            )}
+
             {/* Overlay Info HUD */}
             <div className="absolute top-3 left-3 bg-slate-950/85 backdrop-blur p-2.5 rounded-lg border border-slate-800 text-[11px] text-slate-300 space-y-1.5 shadow-lg">
               <div className="flex items-center justify-between gap-4 border-b border-slate-800 pb-1">
@@ -952,7 +997,7 @@ export const FlightControls3D: React.FC = () => {
                 <div
                   className="w-10 h-10 rounded-full bg-gradient-to-br from-rcac-sky to-blue-700 border-2 border-white shadow-lg pointer-events-none flex items-center justify-center text-slate-950 font-bold text-xs"
                   style={{
-                    transform: `translate(${controls.roll * 75}px, ${-controls.pitch * 75}px)`,
+                    transform: `translate(${controls.roll * 75}px, ${controls.pitch * 75}px)`,
                     transition: isDraggingStick ? 'none' : 'transform 0.25s cubic-bezier(0.18, 0.89, 0.32, 1.28)',
                   }}
                 >
@@ -1054,7 +1099,7 @@ export const FlightControls3D: React.FC = () => {
             {controls.aircraftModel === 'trainer' ? (
               <div className="space-y-1.5 text-slate-300 leading-relaxed text-[11px]">
                 <p>
-                  • <strong>High-Wing Stability:</strong> The high wing arrangement places the center of gravity below the center of lift, creating natural pendulum stability.
+                  • <strong>High-Wing Stability:</strong> On a high-wing aircraft the fuselage hangs below the wing, so in a sideslip the lower wing meets the airflow at a slightly higher angle of attack — a gentle restoring roll (the "keel effect"). Combined with wing dihedral, this gives the 172 its forgiving lateral stability. It is not a pendulum: the restoring forces are aerodynamic, not gravitational.
                 </p>
                 <p>
                   • <strong>Visual Flight Axes:</strong> Toggle the Visual Axes button above or in the HUD to display the three orthogonal coordinate axes passing through the aircraft's center of gravity.
@@ -1066,7 +1111,7 @@ export const FlightControls3D: React.FC = () => {
                   • <strong>Soaring in Thermals:</strong> High aspect ratio wings minimize induced drag at low airspeeds, allowing the glider to circle tightly inside rising warm air columns.
                 </p>
                 <p>
-                  • <strong>Glide Ratio:</strong> 34:1 means that from 3,000 feet, you can glide over 19 nautical miles in calm air!
+                  • <strong>Glide Ratio:</strong> 34:1 means that from 3,000 feet, you can glide about 17 nautical miles in calm air (3,000 ft × 34 ÷ 6,076 ft/NM)!
                 </p>
               </div>
             )}

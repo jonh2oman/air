@@ -114,11 +114,19 @@ export const FlightComputerE6B: React.FC = () => {
   const windAngleRad = ((windDir - trueCourse) * Math.PI) / 180;
   // Wind Correction Angle (WCA) = arcsin((WindSpeed / TAS) * sin(windAngle))
   const sinWca = (windSpeed / Math.max(1, trueAirspeed)) * Math.sin(windAngleRad);
-  const wcaRad = Math.asin(Math.max(-1, Math.min(1, sinWca)));
+  // When the crosswind component exceeds TAS, no WCA exists: the desired
+  // course physically cannot be maintained with this wind. Report that
+  // explicitly instead of displaying a clamped, fake solution.
+  const courseImpossible = Math.abs(sinWca) > 1;
+  const wcaRad = Math.asin(courseImpossible ? 0 : sinWca);
   const wcaDeg = Math.round((wcaRad * 180) / Math.PI);
-  const trueHeading = (trueCourse + wcaDeg + 360) % 360;
+  const trueHeading = courseImpossible ? 0 : (trueCourse + wcaDeg + 360) % 360;
   // Groundspeed: GS = TAS * cos(WCA) - WindSpeed * cos(windAngle)
-  const groundSpeed = Math.max(0, Math.round(trueAirspeed * Math.cos(wcaRad) - windSpeed * Math.cos(windAngleRad)));
+  const groundSpeed = courseImpossible
+    ? 0
+    : Math.max(0, Math.round(trueAirspeed * Math.cos(wcaRad) - windSpeed * Math.cos(windAngleRad)));
+  // Crosswind component magnitude, for the impossibility message.
+  const crosswindMag = Math.round(windSpeed * Math.abs(Math.sin(windAngleRad)));
 
   // 2. Density Altitude Calculation
   // Pressure Altitude = Elevation + (29.92 - Altimeter) * 1000
@@ -129,10 +137,16 @@ export const FlightComputerE6B: React.FC = () => {
   const densityAlt = Math.round(pressureAlt + 120 * (oat - isaTemp));
 
   // 3. Crosswind & Headwind Component
-  const crosswindAngleRad = ((xwWindDir - runwayHeading) * Math.PI) / 180;
+  // Normalise the wind angle relative to the runway heading into (-180, 180]
+  // so the left/right crosswind labelling is correct for every combination
+  // (e.g. runway 01 with wind from 350° is a left crosswind, not right).
+  const relativeWindDeg = (((xwWindDir - runwayHeading) % 360) + 540) % 360 - 180;
+  const crosswindAngleRad = (relativeWindDeg * Math.PI) / 180;
   const crosswindComp = Math.round(Math.abs(xwWindSpeed * Math.sin(crosswindAngleRad)));
   const headwindComp = Math.round(xwWindSpeed * Math.cos(crosswindAngleRad));
   const isTailwind = headwindComp < 0;
+  // Runway numbers run 01–36: a heading of 000 is Runway 36, not Runway 00.
+  const runwayNumber = ((Math.round(runwayHeading / 10) + 35) % 36) + 1;
 
   return (
     <div className="space-y-6">
@@ -147,7 +161,7 @@ export const FlightComputerE6B: React.FC = () => {
               Module 5: E6B Flight Computer & Canadian Aviation Weather
             </h2>
             <p className="text-sm text-slate-400">
-              Wind Drift Triangle • Density Altitude & Performance • Crosswind Calculator • Live Canadian METAR Decoder
+              Wind Drift Triangle • Density Altitude & Performance • Crosswind Calculator • Sample METAR Practice
             </p>
           </div>
         </div>
@@ -184,7 +198,7 @@ export const FlightComputerE6B: React.FC = () => {
               activeTab === 'weather' ? 'bg-rcac-gold text-slate-950 shadow' : 'text-slate-300 hover:text-white'
             }`}
           >
-            Cadet METAR Decoder
+            Sample METAR Practice
           </button>
         </div>
       </div>
@@ -263,22 +277,31 @@ export const FlightComputerE6B: React.FC = () => {
 
             {/* Results Output */}
             <div className="pt-3 border-t border-slate-800 space-y-2.5 font-mono">
-              <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 flex justify-between items-center">
-                <span className="text-slate-400 text-xs">Wind Correction Angle (WCA):</span>
-                <span className={`text-sm font-bold ${wcaDeg !== 0 ? 'text-amber-400' : 'text-slate-300'}`}>
-                  {wcaDeg > 0 ? `+${wcaDeg}° (Right)` : wcaDeg < 0 ? `${wcaDeg}° (Left)` : '0°'}
-                </span>
-              </div>
+              {courseImpossible ? (
+                <div className="p-3 bg-rose-950/70 border border-rose-500 rounded-lg text-rose-200 text-xs leading-relaxed">
+                  <strong className="block mb-1 text-rose-300">COURSE CANNOT BE MAINTAINED</strong>
+                  The crosswind component ({crosswindMag} kts) exceeds your true airspeed ({trueAirspeed} kts) — no heading can hold the desired track with this wind. Increase TAS, reduce wind, or choose a different course.
+                </div>
+              ) : (
+                <>
+                  <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 flex justify-between items-center">
+                    <span className="text-slate-400 text-xs">Wind Correction Angle (WCA):</span>
+                    <span className={`text-sm font-bold ${wcaDeg !== 0 ? 'text-amber-400' : 'text-slate-300'}`}>
+                      {wcaDeg > 0 ? `+${wcaDeg}° (Right)` : wcaDeg < 0 ? `${wcaDeg}° (Left)` : '0°'}
+                    </span>
+                  </div>
 
-              <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 flex justify-between items-center">
-                <span className="text-slate-400 text-xs">Required True Heading (TH):</span>
-                <span className="text-sm font-bold text-rcac-sky">{trueHeading.toString().padStart(3, '0')}°</span>
-              </div>
+                  <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 flex justify-between items-center">
+                    <span className="text-slate-400 text-xs">Required True Heading (TH):</span>
+                    <span className="text-sm font-bold text-rcac-sky">{trueHeading.toString().padStart(3, '0')}°</span>
+                  </div>
 
-              <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 flex justify-between items-center">
-                <span className="text-slate-400 text-xs">Groundspeed (GS):</span>
-                <span className="text-base font-bold text-emerald-400">{groundSpeed} kts</span>
-              </div>
+                  <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 flex justify-between items-center">
+                    <span className="text-slate-400 text-xs">Groundspeed (GS):</span>
+                    <span className="text-base font-bold text-emerald-400">{groundSpeed} kts</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -310,6 +333,18 @@ export const FlightComputerE6B: React.FC = () => {
                 <text x="-148" y="4" fill="#64748b" fontSize="10" textAnchor="end">W (270°)</text>
 
                 {(() => {
+                  if (courseImpossible) {
+                    return (
+                      <g>
+                        <text x="0" y="-8" fill="#f87171" fontSize="15" fontWeight="bold" textAnchor="middle">
+                          COURSE CANNOT BE MAINTAINED
+                        </text>
+                        <text x="0" y="16" fill="#94a3b8" fontSize="11" textAnchor="middle">
+                          Crosswind component exceeds true airspeed — no valid solution.
+                        </text>
+                      </g>
+                    );
+                  }
                   const scale = 0.9;
                   // Desired Track / Ground Course Vector (Green)
                   const tcRad = ((trueCourse - 90) * Math.PI) / 180;
@@ -348,15 +383,23 @@ export const FlightComputerE6B: React.FC = () => {
 
             {/* Explanatory Legend */}
             <div className="flex flex-wrap gap-4 mt-3 text-xs justify-center font-mono">
-              <span className="flex items-center gap-1.5 text-emerald-400">
-                <span className="w-3 h-1 bg-emerald-400 rounded" /> Desired Track (Groundspeed)
-              </span>
-              <span className="flex items-center gap-1.5 text-sky-400">
-                <span className="w-3 h-1 bg-sky-400 rounded" /> Aircraft Heading (TAS)
-              </span>
-              <span className="flex items-center gap-1.5 text-rose-400">
-                <span className="w-3 h-1 bg-rose-400 rounded" /> Wind Vector ({windSpeed} kts from {windDir}°)
-              </span>
+              {courseImpossible ? (
+                <span className="flex items-center gap-1.5 text-rose-400">
+                  No wind-triangle solution exists — the wind is too strong for this TAS and course.
+                </span>
+              ) : (
+                <>
+                  <span className="flex items-center gap-1.5 text-emerald-400">
+                    <span className="w-3 h-1 bg-emerald-400 rounded" /> Desired Track (Groundspeed)
+                  </span>
+                  <span className="flex items-center gap-1.5 text-sky-400">
+                    <span className="w-3 h-1 bg-sky-400 rounded" /> Aircraft Heading (TAS)
+                  </span>
+                  <span className="flex items-center gap-1.5 text-rose-400">
+                    <span className="w-3 h-1 bg-rose-400 rounded" /> Wind Vector ({windSpeed} kts from {windDir}°)
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -457,7 +500,7 @@ export const FlightComputerE6B: React.FC = () => {
                   <>
                     Because the air is warm and less dense, your aircraft performs as though it is flying at{' '}
                     <strong className="text-amber-400">{densityAlt.toLocaleString()} feet</strong>!
-                    <br />• <strong>Takeoff Distance:</strong> Increases by ~{Math.round(((densityAlt - elevation) / 1000) * 12)}%
+                    <br />• <strong>Takeoff Distance:</strong> Rough estimate only — increases by ~{Math.round(((densityAlt - elevation) / 1000) * 12)}% per this rule of thumb (varies by aircraft; always use the POH performance charts).
                     <br />• <strong>Climb Rate:</strong> Significantly reduced (gliders need stronger thermals to gain altitude; towplanes climb slower).
                   </>
                 ) : (
@@ -485,7 +528,7 @@ export const FlightComputerE6B: React.FC = () => {
                 <div className="flex justify-between">
                   <span className="text-slate-300">Runway Orientation (Heading)</span>
                   <span className="font-mono text-white font-bold">
-                    Runway {Math.round(runwayHeading / 10).toString().padStart(2, '0')} ({runwayHeading}°)
+                    Runway {runwayNumber.toString().padStart(2, '0')} ({runwayHeading}°)
                   </span>
                 </div>
                 <input
@@ -544,7 +587,7 @@ export const FlightComputerE6B: React.FC = () => {
                   {crosswindComp} KTS
                 </span>
                 <span className="text-[10px] text-slate-500 block mt-1">
-                  {crosswindAngleRad > 0 ? 'From Right' : 'From Left'}
+                  {crosswindComp === 0 ? 'No crosswind' : relativeWindDeg > 0 ? 'From Right' : 'From Left'}
                 </span>
               </div>
 
@@ -566,7 +609,7 @@ export const FlightComputerE6B: React.FC = () => {
               <div className="font-bold text-white">Cadet Aircraft Crosswind Limits:</div>
               <p>
                 • <strong>Schweizer 2-33A Glider Max Crosswind:</strong> 12 kts (Cadet solo), 15 kts (Dual training).
-                <br />• <strong>Cessna 172 Max Demonstrated:</strong> 15 kts.
+                <br />• <strong>Cessna 172 Max Demonstrated Crosswind:</strong> ~15 kts — a demonstrated value that varies by model, not an operating limit. Check the aircraft flight manual / POH.
               </p>
               {crosswindComp > 12 && (
                 <div className="p-2 bg-rose-950/70 border border-rose-500 rounded text-rose-300 font-semibold">
@@ -620,6 +663,9 @@ export const FlightComputerE6B: React.FC = () => {
               <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono text-emerald-400 text-xs overflow-x-auto tracking-wide">
                 {selectedMetar.raw}
               </div>
+              <p className="text-[10px] text-slate-500 mt-1">
+                Sample reports for practice only — not live data. Always check an official source (e.g. Nav Canada) for actual weather before flight.
+              </p>
             </div>
 
             {/* Plain-English Cadet Translation */}

@@ -1,105 +1,177 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Compass, 
-  Wind, 
-  Radio, 
-  ShieldAlert, 
-  CheckCircle, 
-  AlertTriangle, 
-  Play, 
-  Pause, 
-  RotateCcw, 
-  Volume2, 
-  ChevronRight, 
+import {
+  Compass,
+  Wind,
+  Radio,
+  ShieldAlert,
+  CheckCircle,
+  AlertTriangle,
+  Play,
+  Pause,
+  RotateCcw,
+  Volume2,
+  ChevronRight,
   HelpCircle,
   Eye,
-  Info
+  Info,
+  Clock
 } from 'lucide-react';
 import { soundManager } from '../utils/audio';
 
 type CircuitLeg = 'upwind' | 'crosswind' | 'downwind' | 'base' | 'final';
 type CircuitEntryType = '45-downwind' | 'overhead-cross' | 'straight-in';
+type AircraftType = 'powered' | 'glider';
+
+interface LegVariant {
+  speed: string;
+  actions: string[];
+  radioCall: string;
+}
 
 interface LegDetail {
   id: CircuitLeg;
   name: string;
+  heading: string;
   altitude: string;
-  speed: string;
-  actions: string[];
-  radioCall: string;
+  powered: LegVariant;
+  glider: LegVariant;
   keyCheck: string;
 }
 
+// Radio calls below are for an UNCONTROLLED aerodrome on its published ATF.
+// "Prairie" is a placeholder — cadets substitute their own aerodrome name from the CFS.
+// Format: [aerodrome] traffic, [aircraft identification], [position/intentions], [aerodrome].
 const CIRCUIT_LEGS: Record<CircuitLeg, LegDetail> = {
   upwind: {
     id: 'upwind',
     name: '1. Upwind (Departure / Climb)',
+    heading: '270°',
     altitude: '0 to 500 ft AGL',
-    speed: 'Vy = 74 KIAS (Glider: 55 KIAS)',
-    actions: [
-      'Apply full takeoff power and maintain runway centerline with rudder',
-      'Rotate at 55 KIAS and establish climb pitch attitude',
-      'Climb straight ahead until reaching 500 ft AGL before initiating turn',
-      'Scan left, clear airspace, and prepare for 90° crosswind turn'
-    ],
-    radioCall: '"Cadet Traffic, Glider 71 / Skyhawk 172 airborne runway 27, climbing to circuit altitude."',
-    keyCheck: 'Wings level, full power, eyes outside scanning for traffic'
+    powered: {
+      speed: 'Vy = 74 KIAS',
+      actions: [
+        'Apply full takeoff power and maintain runway centerline with rudder',
+        'Rotate at 55 KIAS and establish the climb pitch attitude',
+        'Climb straight ahead on runway heading (270°) to 500 ft AGL before any turn',
+        'Scan left, confirm the crosswind leg is clear, and prepare for a 90° LEFT turn'
+      ],
+      radioCall: '"Prairie traffic, Cessna 172 Golf Alpha Bravo Charlie airborne runway 27, Prairie."'
+    },
+    glider: {
+      speed: 'Aerotow: 60–65 KIAS',
+      actions: [
+        'Hold position behind the towplane and track the runway centerline',
+        'Lift off with the towplane and climb straight ahead on runway heading (270°)',
+        'Do not release from tow or turn below 500 ft AGL',
+        'Scan left and prepare for the left turn to crosswind after release'
+      ],
+      radioCall: '"Prairie traffic, Glider 71 on tow, airborne runway 27, Prairie."'
+    },
+    keyCheck: 'Wings level on runway heading 270°, eyes outside scanning for traffic'
   },
   crosswind: {
     id: 'crosswind',
     name: '2. Crosswind Leg',
+    heading: '180°',
     altitude: '500 to 1,000 ft AGL',
-    speed: 'Climb speed (70-74 KIAS)',
-    actions: [
-      'At 500 ft AGL, execute a standard rate 90° climbing turn perpendicular to runway',
-      'Compensate for wind drift to maintain a track at 90° to the extended runway centerline',
-      'Level off at circuit altitude (1,000 ft AGL) and adjust to cruise power (2,300 RPM)',
-      'Look 45° aft to ensure safe spacing from the runway before turning downwind'
-    ],
-    radioCall: '"Cadet Traffic, Skyhawk 172 crosswind runway 27, climbing 1,000."',
-    keyCheck: 'Level off at exactly 1,000 ft AGL, set cruise power & trim'
+    powered: {
+      speed: 'Climb speed (70–74 KIAS)',
+      actions: [
+        'At 500 ft AGL, make a standard-rate 90° LEFT climbing turn to heading 180°',
+        'Compensate for wind drift to keep a ground track perpendicular to the runway',
+        'Level off at circuit altitude (1,000 ft AGL); set cruise power (2,300 RPM) and trim',
+        'Glance back toward the runway to confirm safe spacing before turning downwind'
+      ],
+      radioCall: '"Prairie traffic, Cessna 172 Golf Alpha Bravo Charlie crosswind runway 27, Prairie."'
+    },
+    glider: {
+      speed: 'Best-glide / approach speed (per POH)',
+      actions: [
+        'After release at or above 500 ft AGL, make a 90° LEFT turn to heading 180°',
+        'Trim for best-glide speed and compensate for wind drift',
+        'Confirm you can comfortably reach the field and pick your landing reference point early'
+      ],
+      radioCall: '"Prairie traffic, Glider 71 crosswind runway 27, Prairie."'
+    },
+    keyCheck: 'Established on heading 180°; level at 1,000 ft AGL (powered)'
   },
   downwind: {
     id: 'downwind',
     name: '3. Downwind Leg',
+    heading: '090°',
     altitude: '1,000 ft AGL (Level)',
-    speed: '85 - 90 KIAS (Glider: 55 KIAS)',
-    actions: [
-      'Fly parallel to runway in reciprocal direction (Heading 090 for Runway 27)',
-      'Maintain spacing (approx. 0.5 to 1 nautical mile from runway)',
-      'Perform BUMPFICH Pre-Landing Checks (Brakes, Undercarriage, Mixture, Prop, Fuel, Instruments, Carb Heat, Hatches/Harnesses)',
-      'When abeam the runway numbers: reduce throttle to 1,500 RPM, carb heat ON, deploy 10° flaps'
-    ],
-    radioCall: '"Cadet Tower, Skyhawk 172 downwind runway 27, full stop / touch and go."',
-    keyCheck: 'BUMPFICH checklist complete & radio call abeam touchdown point'
+    powered: {
+      speed: '85–90 KIAS',
+      actions: [
+        'Left turn onto heading 090°, flying parallel to the runway in the reciprocal direction',
+        'Hold 0.5 to 1 NM lateral spacing from the runway',
+        'Run the BUMPFICH pre-landing check (see card) — check the C172 notes for each item',
+        'Abeam the touchdown point: throttle to 1,500 RPM, carb heat ON, 10° flaps'
+      ],
+      radioCall: '"Prairie traffic, Cessna 172 Golf Alpha Bravo Charlie downwind runway 27, touch and go, Prairie."'
+    },
+    glider: {
+      speed: 'Approach speed (per POH)',
+      actions: [
+        'Left turn onto heading 090°, parallel to the runway at 1,000 ft AGL',
+        'Run the glider pre-landing check: harness secure, spoilers/airbrakes checked and closed, trim set',
+        'Abeam the touchdown point, plan the base turn so the approach angle stays manageable'
+      ],
+      radioCall: '"Prairie traffic, Glider 71 downwind runway 27, Prairie."'
+    },
+    keyCheck: 'Pre-landing checks complete; downwind call made abeam the touchdown point'
   },
   base: {
     id: 'base',
     name: '4. Base Leg',
+    heading: '360°',
     altitude: '1,000 down to 500 ft AGL',
-    speed: '70 - 75 KIAS',
-    actions: [
-      'Initiate 90° turn toward final when the runway threshold is 45° behind your wingtip',
-      'Establish a 500 fpm stabilized descent rate',
-      'Select 20° flaps and trim elevator for 70 KIAS',
-      'Visually scan straight-in final for any conflicting traffic'
-    ],
-    radioCall: '"Cadet Tower, Skyhawk 172 turning base runway 27."',
-    keyCheck: 'Airspeed control is critical: maintain 70 KIAS with pitch, descent rate with throttle'
+    powered: {
+      speed: '70–75 KIAS',
+      actions: [
+        'Make the left turn to base when the runway threshold is 45° behind your LEFT wingtip',
+        'Establish a stabilized ~500 fpm descent',
+        '20° flaps, trimmed for 70 KIAS',
+        'Scan the final approach for conflicting traffic before turning'
+      ],
+      radioCall: '"Prairie traffic, Cessna 172 Golf Alpha Bravo Charlie turning base runway 27, Prairie."'
+    },
+    glider: {
+      speed: 'Approach speed (per POH)',
+      actions: [
+        'Left turn to base, keeping the touchdown point in sight',
+        'Use spoilers/airbrakes as needed to control the descent angle',
+        'Scan the final approach for conflicting traffic'
+      ],
+      radioCall: '"Prairie traffic, Glider 71 turning base runway 27, Prairie."'
+    },
+    keyCheck: 'Airspeed on target with pitch; descent rate as required — stabilized'
   },
   final: {
     id: 'final',
     name: '5. Final Approach & Flare',
+    heading: '270°',
     altitude: '500 ft AGL to Touchdown',
-    speed: '60 - 65 KIAS over fence',
-    actions: [
-      'Roll out smoothly aligned with the extended runway centerline',
-      'Check PAPI glide path lights: Aim for 2 White, 2 Red (3° glide path)',
-      'Select full flaps (30°) or modulate glider airbrakes/spoilers as required',
-      'Cross threshold at 10-15 ft, reduce throttle to idle, smoothly flare nose-up for main wheels first'
-    ],
-    radioCall: '"Cadet Tower, Skyhawk 172 final runway 27."',
-    keyCheck: 'Stabilized approach: Centerline aligned, airspeed on target, 2 Red 2 White PAPI'
+    powered: {
+      speed: '60–65 KIAS over the fence',
+      actions: [
+        'Roll out of the left turn aligned with the extended runway centerline',
+        'PAPI check: 2 red, 2 white means on the 3° glidepath',
+        'Full flaps (30°); keep the aiming point steady in the windshield',
+        'Cross the threshold at 10–15 ft, throttle to idle, and flare to touch down on the main wheels'
+      ],
+      radioCall: '"Prairie traffic, Cessna 172 Golf Alpha Bravo Charlie final runway 27, Prairie."'
+    },
+    glider: {
+      speed: 'Approach speed + margin (per POH)',
+      actions: [
+        'Roll out of the left turn aligned with the extended runway centerline',
+        'Modulate spoilers/airbrakes to hold the glidepath to the aiming point',
+        'Round out and hold off for a smooth main-wheel touchdown'
+      ],
+      radioCall: '"Prairie traffic, Glider 71 final runway 27, Prairie."'
+    },
+    keyCheck: 'Stabilized: centerline, airspeed, glidepath — 2 red / 2 white on the PAPI (powered)'
   }
 };
 
@@ -170,11 +242,13 @@ const LIGHT_GUN_SIGNALS: LightGunSignal[] = [
   }
 ];
 
-export const AirportCircuitLab: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'circuit' | 'lightgun' | 'airspace'>('circuit');
+const QUIZ_TIME_LIMIT = 10; // seconds per light-gun question
+
+export const AirportCircuitLab: React.FC = () => {  const [activeTab, setActiveTab] = useState<'circuit' | 'lightgun' | 'airspace'>('circuit');
   
   // Circuit Simulator State
   const [selectedLeg, setSelectedLeg] = useState<CircuitLeg>('downwind');
+  const [aircraftType, setAircraftType] = useState<AircraftType>('powered');
   const [isAnimating, setIsAnimating] = useState(false);
   const [animProgress, setAnimProgress] = useState(0.45); // 0 to 1 along circuit
   const [entryType, setEntryType] = useState<CircuitEntryType>('45-downwind');
@@ -184,6 +258,7 @@ export const AirportCircuitLab: React.FC = () => {
   // Light Gun Simulator State
   const [selectedLight, setSelectedLight] = useState<LightGunSignal>(LIGHT_GUN_SIGNALS[0]);
   const [quizMode, setQuizMode] = useState(false);
+  const [quizTimeLeft, setQuizTimeLeft] = useState(QUIZ_TIME_LIMIT);
   const [quizQuestion, setQuizQuestion] = useState<{
     signal: LightGunSignal;
     scenario: 'inFlight' | 'onGround';
@@ -193,12 +268,11 @@ export const AirportCircuitLab: React.FC = () => {
   const [quizSelectedAnswer, setQuizSelectedAnswer] = useState<string | null>(null);
   const [quizScore, setQuizScore] = useState({ correct: 0, total: 0 });
 
-  // Runway 27 vs 09 math
+  // Runway 27 is fixed for this lesson (see note below the calculator).
   const runwayHeading = 270;
   const windAngleDiff = ((windDirection - runwayHeading + 540) % 360) - 180;
   const headwindComponent = Math.round(windSpeed * Math.cos((windAngleDiff * Math.PI) / 180));
   const crosswindComponent = Math.round(Math.abs(windSpeed * Math.sin((windAngleDiff * Math.PI) / 180)));
-  const isRunway27Active = headwindComponent >= 0;
 
   // Circuit automatic flight animation loop
   useEffect(() => {
@@ -240,7 +314,21 @@ export const AirportCircuitLab: React.FC = () => {
       correctAnswer
     });
     setQuizSelectedAnswer(null);
+    setQuizTimeLeft(QUIZ_TIME_LIMIT);
   };
+
+  // Quiz countdown: when time expires the question is marked wrong
+  useEffect(() => {
+    if (!quizMode || !quizQuestion || quizSelectedAnswer !== null) return;
+    if (quizTimeLeft <= 0) {
+      setQuizSelectedAnswer('__TIMEOUT__');
+      soundManager.playClick();
+      setQuizScore((prev) => ({ ...prev, total: prev.total + 1 }));
+      return;
+    }
+    const t = setTimeout(() => setQuizTimeLeft((v) => v - 1), 1000);
+    return () => clearTimeout(t);
+  }, [quizMode, quizQuestion, quizSelectedAnswer, quizTimeLeft]);
 
   const handleAnswerSelect = (option: string) => {
     if (quizSelectedAnswer !== null || !quizQuestion) return;
@@ -325,7 +413,7 @@ export const AirportCircuitLab: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-semibold text-white tracking-wide uppercase font-mono flex items-center gap-2">
                     <Compass className="w-4 h-4 text-rcac-sky" />
-                    Standard Left-Hand Traffic Pattern (1,000' AGL)
+                    Standard Left-Hand Traffic Pattern — Runway 27 (1,000' AGL)
                   </h3>
                 </div>
                 <div className="flex items-center gap-2">
@@ -391,15 +479,18 @@ export const AirportCircuitLab: React.FC = () => {
                   <text x="265" y="314" fill="#f8fafc" fontSize="11" fontWeight="bold" fontFamily="monospace">09</text>
                   <text x="535" y="314" fill="#f8fafc" fontSize="11" fontWeight="bold" fontFamily="monospace">27</text>
 
-                  {/* Active Runway Indicator */}
-                  <circle cx={isRunway27Active ? 535 : 265} cy="310" r="14" fill="none" stroke="#22c55e" strokeWidth="2" strokeDasharray="3 3" />
+                  {/* Active Runway Indicator (lesson fixed on Runway 27) */}
+                  <circle cx={535} cy="310" r="14" fill="none" stroke="#22c55e" strokeWidth="2" strokeDasharray="3 3" />
 
                   {/* Control Tower & Windsock Position */}
-                  <rect x="380" y="360" width="24" height="24" rx="4" fill="#334155" stroke="#64748b" strokeWidth="1.5" />
-                  <text x="392" y="375" fill="#e2e8f0" fontSize="8" fontWeight="bold" textAnchor="middle">TWR</text>
+                  <rect x="440" y="360" width="24" height="24" rx="4" fill="#334155" stroke="#64748b" strokeWidth="1.5" />
+                  <text x="452" y="375" fill="#e2e8f0" fontSize="8" fontWeight="bold" textAnchor="middle">TWR</text>
                   
-                  {/* Circuit Path: Rectangular Left-Hand Pattern for Runway 27 */}
-                  {/* Leg 1: Upwind (Right to Left along runway from x=530 to x=140) */}
+                  {/* Circuit Path: Rectangular Left-Hand Pattern for Runway 27.
+                      Departure heading 270° (west), then LEFT turns only:
+                      270 → 180 (crosswind, south) → 090 (downwind, east)
+                      → 360 (base, north) → 270 (final, west). */}
+                  {/* Leg 1: Upwind (heading 270, west along runway from x=500 to x=140) */}
                   <path 
                     d="M 500 310 L 140 310" 
                     fill="none" 
@@ -411,9 +502,9 @@ export const AirportCircuitLab: React.FC = () => {
                     onClick={() => { setSelectedLeg('upwind'); soundManager.playClick(); }}
                   />
 
-                  {/* Leg 2: Crosswind (From x=140, y=310 down/north to x=140, y=100) */}
+                  {/* Leg 2: Crosswind (left turn to heading 180, south: x=140, y=310 to y=420) */}
                   <path 
-                    d="M 140 310 L 140 100" 
+                    d="M 140 310 L 140 420" 
                     fill="none" 
                     stroke={selectedLeg === 'crosswind' ? '#38bdf8' : '#334155'} 
                     strokeWidth={selectedLeg === 'crosswind' ? 4 : 2} 
@@ -423,9 +514,9 @@ export const AirportCircuitLab: React.FC = () => {
                     onClick={() => { setSelectedLeg('crosswind'); soundManager.playClick(); }}
                   />
 
-                  {/* Leg 3: Downwind (From x=140, y=100 to x=660, y=100) */}
+                  {/* Leg 3: Downwind (left turn to heading 090, east: x=140 to x=660 at y=420) */}
                   <path 
-                    d="M 140 100 L 660 100" 
+                    d="M 140 420 L 660 420" 
                     fill="none" 
                     stroke={selectedLeg === 'downwind' ? '#38bdf8' : '#334155'} 
                     strokeWidth={selectedLeg === 'downwind' ? 4 : 2} 
@@ -435,9 +526,9 @@ export const AirportCircuitLab: React.FC = () => {
                     onClick={() => { setSelectedLeg('downwind'); soundManager.playClick(); }}
                   />
 
-                  {/* Leg 4: Base Leg (From x=660, y=100 down to x=660, y=310) */}
+                  {/* Leg 4: Base Leg (left turn to heading 360, north: x=660, y=420 to y=310) */}
                   <path 
-                    d="M 660 100 L 660 310" 
+                    d="M 660 420 L 660 310" 
                     fill="none" 
                     stroke={selectedLeg === 'base' ? '#38bdf8' : '#334155'} 
                     strokeWidth={selectedLeg === 'base' ? 4 : 2} 
@@ -447,7 +538,7 @@ export const AirportCircuitLab: React.FC = () => {
                     onClick={() => { setSelectedLeg('base'); soundManager.playClick(); }}
                   />
 
-                  {/* Leg 5: Final Approach (From x=660, y=310 to x=540, y=310) */}
+                  {/* Leg 5: Final Approach (left turn to heading 270, west: x=660 to x=535 at y=310) */}
                   <path 
                     d="M 660 310 L 535 310" 
                     fill="none" 
@@ -462,7 +553,7 @@ export const AirportCircuitLab: React.FC = () => {
                   {/* Circuit Entry Path Overlays */}
                   {entryType === '45-downwind' && (
                     <path
-                      d="M 320 20 L 400 100"
+                      d="M 340 480 L 400 420"
                       fill="none"
                       stroke="#fbbf24"
                       strokeWidth="2.5"
@@ -472,7 +563,7 @@ export const AirportCircuitLab: React.FC = () => {
                   )}
                   {entryType === 'overhead-cross' && (
                     <path
-                      d="M 400 420 L 400 100"
+                      d="M 400 20 L 400 420"
                       fill="none"
                       stroke="#f59e0b"
                       strokeWidth="2.5"
@@ -490,20 +581,20 @@ export const AirportCircuitLab: React.FC = () => {
                     className="cursor-pointer"
                     onClick={() => setSelectedLeg('upwind')}
                   >
-                    1. UPWIND (CLIMB TO 500')
+                    1. UPWIND (HDG 270° — CLIMB TO 500')
                   </text>
                   <text 
-                    x="50" y="210" 
+                    x="50" y="370" 
                     fill={selectedLeg === 'crosswind' ? '#38bdf8' : '#94a3b8'} 
                     fontSize="11" 
                     fontWeight="bold" 
                     className="cursor-pointer"
                     onClick={() => setSelectedLeg('crosswind')}
                   >
-                    2. CROSSWIND
+                    2. CROSSWIND (HDG 180°)
                   </text>
                   <text 
-                    x="400" y="80" 
+                    x="400" y="448" 
                     fill={selectedLeg === 'downwind' ? '#38bdf8' : '#94a3b8'} 
                     fontSize="11" 
                     fontWeight="bold" 
@@ -511,17 +602,17 @@ export const AirportCircuitLab: React.FC = () => {
                     className="cursor-pointer"
                     onClick={() => setSelectedLeg('downwind')}
                   >
-                    3. DOWNWIND (1,000' AGL — BUMPFICH CHECK)
+                    3. DOWNWIND (HDG 090° — 1,000' AGL, PRE-LANDING CHECK)
                   </text>
                   <text 
-                    x="675" y="210" 
+                    x="675" y="370" 
                     fill={selectedLeg === 'base' ? '#38bdf8' : '#94a3b8'} 
                     fontSize="11" 
                     fontWeight="bold" 
                     className="cursor-pointer"
                     onClick={() => setSelectedLeg('base')}
                   >
-                    4. BASE
+                    4. BASE (HDG 360°)
                   </text>
                   <text 
                     x="600" y="335" 
@@ -532,43 +623,44 @@ export const AirportCircuitLab: React.FC = () => {
                     className="cursor-pointer"
                     onClick={() => setSelectedLeg('final')}
                   >
-                    5. FINAL (PAPI 2R / 2W)
+                    5. FINAL (HDG 270° — PAPI 2R / 2W)
                   </text>
 
                   {/* Animated Aircraft Position Icon */}
                   {(() => {
-                    // Compute plane coordinates along rectangular path
-                    let px = 500, py = 310, pRot = 180;
+                    // Compute plane coordinates along the left-hand rectangular path.
+                    // The plane glyph points north at rotation 0, so rotation = heading.
+                    let px = 500, py = 310, pRot = 270;
                     if (animProgress < 0.20) {
-                      // Upwind: 500 -> 140 at y=310
+                      // Upwind: 500 -> 140 at y=310 (heading 270)
                       const t = animProgress / 0.20;
                       px = 500 - t * (500 - 140);
                       py = 310;
-                      pRot = 180;
+                      pRot = 270;
                     } else if (animProgress < 0.35) {
-                      // Crosswind: 140 at y=310 -> y=100
+                      // Crosswind: 140 at y=310 -> y=420 (heading 180)
                       const t = (animProgress - 0.20) / 0.15;
                       px = 140;
-                      py = 310 - t * (310 - 100);
-                      pRot = 270;
+                      py = 310 + t * (420 - 310);
+                      pRot = 180;
                     } else if (animProgress < 0.65) {
-                      // Downwind: 140 -> 660 at y=100
+                      // Downwind: 140 -> 660 at y=420 (heading 090)
                       const t = (animProgress - 0.35) / 0.30;
                       px = 140 + t * (660 - 140);
-                      py = 100;
-                      pRot = 0;
+                      py = 420;
+                      pRot = 90;
                     } else if (animProgress < 0.80) {
-                      // Base: 660 at y=100 -> y=310
+                      // Base: 660 at y=420 -> y=310 (heading 360)
                       const t = (animProgress - 0.65) / 0.15;
                       px = 660;
-                      py = 100 + t * (310 - 100);
-                      pRot = 90;
+                      py = 420 - t * (420 - 310);
+                      pRot = 0;
                     } else {
-                      // Final: 660 -> 500 at y=310
+                      // Final: 660 -> 500 at y=310 (heading 270)
                       const t = (animProgress - 0.80) / 0.20;
                       px = 660 - t * (660 - 500);
                       py = 310;
-                      pRot = 180;
+                      pRot = 270;
                     }
 
                     return (
@@ -583,7 +675,7 @@ export const AirportCircuitLab: React.FC = () => {
                   })()}
 
                   {/* Windsock Widget on Canvas */}
-                  <g transform="translate(680, 420)">
+                  <g transform="translate(90, 90)">
                     <circle cx="0" cy="0" r="35" fill="#0f172a" stroke="#334155" strokeWidth="1" />
                     {/* Compass North */}
                     <text x="0" y="-22" fill="#ef4444" fontSize="8" fontWeight="bold" textAnchor="middle">N</text>
@@ -606,26 +698,29 @@ export const AirportCircuitLab: React.FC = () => {
               {/* Circuit Controls & Entry Selection */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 text-xs font-mono">
                 <div>
-                  <label className="text-slate-400 font-semibold mb-1 block">Circuit Entry Procedure:</label>
+                  <label className="text-slate-400 font-semibold mb-1 block">Circuit Entry Procedure (TC AIM RAC 4.5.2):</label>
                   <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
                     <button
                       onClick={() => setEntryType('45-downwind')}
+                      title="Only at aerodromes within an MF area when airport advisory information is available"
                       className={`py-1.5 px-2 rounded text-center transition ${
                         entryType === '45-downwind' ? 'bg-rcac-blue text-white' : 'text-slate-400 hover:text-slate-200'
                       }`}
                     >
-                      45° Downwind
+                      45° Downwind · MF + advisory
                     </button>
                     <button
                       onClick={() => setEntryType('overhead-cross')}
+                      title="Default at aerodromes not within an MF area, and at MF aerodromes when no advisory is available"
                       className={`py-1.5 px-2 rounded text-center transition ${
                         entryType === 'overhead-cross' ? 'bg-rcac-blue text-white' : 'text-slate-400 hover:text-slate-200'
                       }`}
                     >
-                      Midfield 1500'
+                      Upwind side / Overhead
                     </button>
                     <button
                       onClick={() => setEntryType('straight-in')}
+                      title="At MF aerodromes with airport advisory available; otherwise only once certain of no traffic conflict"
                       className={`py-1.5 px-2 rounded text-center transition ${
                         entryType === 'straight-in' ? 'bg-rcac-blue text-white' : 'text-slate-400 hover:text-slate-200'
                       }`}
@@ -633,6 +728,13 @@ export const AirportCircuitLab: React.FC = () => {
                       Straight-in
                     </button>
                   </div>
+                  <p className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">
+                    TC AIM RAC 4.5.2: where no MF procedures apply, approach the circuit from the{' '}
+                    <span className="text-slate-300 font-semibold">upwind side</span> and join downwind. Joining at{' '}
+                    <span className="text-slate-300 font-semibold">45° to downwind</span> (or straight-in to
+                    downwind/base/final) is for aerodromes <span className="text-slate-300 font-semibold">within an
+                    MF area when airport advisory information is available</span>.
+                  </p>
                 </div>
 
                 <div>
@@ -673,23 +775,48 @@ export const AirportCircuitLab: React.FC = () => {
                   <span className="w-2.5 h-2.5 rounded-full bg-rcac-sky animate-ping" />
                   {CIRCUIT_LEGS[selectedLeg].name}
                 </h4>
-                <span className="text-xs font-mono text-rcac-gold px-2 py-0.5 rounded bg-amber-950/60 border border-amber-800/40">
-                  {CIRCUIT_LEGS[selectedLeg].altitude}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-mono text-sky-300 px-2 py-0.5 rounded bg-sky-950/60 border border-sky-800/40">
+                    HDG {CIRCUIT_LEGS[selectedLeg].heading}
+                  </span>
+                  <span className="text-xs font-mono text-rcac-gold px-2 py-0.5 rounded bg-amber-950/60 border border-amber-800/40">
+                    {CIRCUIT_LEGS[selectedLeg].altitude}
+                  </span>
+                </div>
+              </div>
+
+              {/* Powered / Glider Toggle */}
+              <div className="grid grid-cols-2 gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 mb-3">
+                <button
+                  onClick={() => { setAircraftType('powered'); soundManager.playClick(); }}
+                  className={`py-1.5 px-2 rounded text-center text-xs font-semibold transition ${
+                    aircraftType === 'powered' ? 'bg-rcac-blue text-white' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  🛩️ C172 (Powered)
+                </button>
+                <button
+                  onClick={() => { setAircraftType('glider'); soundManager.playClick(); }}
+                  className={`py-1.5 px-2 rounded text-center text-xs font-semibold transition ${
+                    aircraftType === 'glider' ? 'bg-rcac-blue text-white' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  🪂 Glider
+                </button>
               </div>
 
               <div className="space-y-3 text-xs">
                 <div>
                   <span className="text-slate-400 font-semibold block mb-1">Target Speed:</span>
                   <p className="font-mono text-slate-200 bg-slate-950 px-2.5 py-1.5 rounded border border-slate-800">
-                    {CIRCUIT_LEGS[selectedLeg].speed}
+                    {CIRCUIT_LEGS[selectedLeg][aircraftType].speed}
                   </p>
                 </div>
 
                 <div>
                   <span className="text-slate-400 font-semibold block mb-1">Cadet Pilot Actions:</span>
                   <ul className="space-y-1.5 text-slate-300">
-                    {CIRCUIT_LEGS[selectedLeg].actions.map((act, i) => (
+                    {CIRCUIT_LEGS[selectedLeg][aircraftType].actions.map((act, i) => (
                       <li key={i} className="flex items-start gap-1.5">
                         <ChevronRight className="w-3.5 h-3.5 text-rcac-sky flex-shrink-0 mt-0.5" />
                         <span>{act}</span>
@@ -714,8 +841,30 @@ export const AirportCircuitLab: React.FC = () => {
                     </button>
                   </div>
                   <p className="font-mono text-emerald-400 text-xs italic">
-                    {CIRCUIT_LEGS[selectedLeg].radioCall}
+                    {CIRCUIT_LEGS[selectedLeg][aircraftType].radioCall}
                   </p>
+                  <p className="text-[10px] text-slate-500 mt-1.5">
+                    Uncontrolled-aerodrome format on the published ATF. "Prairie" is a placeholder —
+                    substitute your aerodrome's name from the CFS.
+                  </p>
+                </div>
+
+                {/* Controlled / MF Phraseology Note */}
+                <div className="bg-sky-950/40 p-3 rounded-lg border border-sky-900/50 text-[11px] text-slate-400">
+                  <p className="font-semibold text-sky-300 mb-1">CONTROLLED &amp; MF AERODROMES</p>
+                  <p>
+                    The calls above suit an <span className="text-slate-200">uncontrolled aerodrome</span> on its ATF.
+                    At a <span className="text-slate-200">controlled aerodrome</span>, address the tower instead
+                    ("Prairie Tower, Cessna 172 Golf Alpha Bravo Charlie ..."). At an{' '}
+                    <span className="text-slate-200">MF aerodrome</span>, broadcast on the mandatory frequency and
+                    monitor for airport advisories. Same call shape — only the station name changes.
+                  </p>
+                </div>
+
+                {/* Key Check */}
+                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                  <span className="text-[11px] text-rcac-gold font-mono font-bold block mb-1">KEY CHECK</span>
+                  <p className="text-slate-300">{CIRCUIT_LEGS[selectedLeg].keyCheck}</p>
                 </div>
               </div>
             </div>
@@ -724,26 +873,29 @@ export const AirportCircuitLab: React.FC = () => {
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">
               <h4 className="text-sm font-bold text-white mb-2 font-mono flex items-center justify-between">
                 <span>DOWNWIND "BUMPFICH" CHECK</span>
-                <span className="text-[10px] text-rcac-sky">ROYAL CANADIAN AIR CADETS</span>
+                <span className="text-[10px] text-rcac-sky">POWERED AIRCRAFT</span>
               </h4>
               <p className="text-xs text-slate-400 mb-3">
-                Mandatory mnemonic recited by cadet pilots on downwind abeam the runway threshold:
+                A generic pre-landing mnemonic taught to cadet pilots. The notes show what each item means on the
+                <span className="text-slate-200"> C172 (fixed landing gear, fixed-pitch propeller)</span> versus
+                complex types. Gliders do not use BUMPFICH — they have a separate pre-landing check
+                (harness, spoilers/airbrakes, trim).
               </p>
               <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono">
                 <div className="bg-slate-950 p-1.5 rounded border border-slate-800">
-                  <span className="text-rcac-gold font-bold">B</span> - Brakes (Checked & Off)
+                  <span className="text-rcac-gold font-bold">B</span> - Brakes (Checked &amp; Off)
                 </div>
                 <div className="bg-slate-950 p-1.5 rounded border border-slate-800">
-                  <span className="text-rcac-gold font-bold">U</span> - Undercarriage (Down & Locked)
+                  <span className="text-rcac-gold font-bold">U</span> - Undercarriage: <span className="text-slate-300">C172 fixed gear — no action</span> <span className="text-slate-500">(retractable: DOWN &amp; locked)</span>
                 </div>
                 <div className="bg-slate-950 p-1.5 rounded border border-slate-800">
                   <span className="text-rcac-gold font-bold">M</span> - Mixture (Full Rich)
                 </div>
                 <div className="bg-slate-950 p-1.5 rounded border border-slate-800">
-                  <span className="text-rcac-gold font-bold">P</span> - Propeller (High RPM / Fixed)
+                  <span className="text-rcac-gold font-bold">P</span> - Propeller: <span className="text-slate-300">C172 fixed-pitch — no action</span> <span className="text-slate-500">(controllable-pitch: HIGH RPM)</span>
                 </div>
                 <div className="bg-slate-950 p-1.5 rounded border border-slate-800">
-                  <span className="text-rcac-gold font-bold">F</span> - Fuel (Selector on BOTH/Full)
+                  <span className="text-rcac-gold font-bold">F</span> - Fuel (Selector BOTH, quantity checked)
                 </div>
                 <div className="bg-slate-950 p-1.5 rounded border border-slate-800">
                   <span className="text-rcac-gold font-bold">I</span> - Instruments (Engine gauges green)
@@ -752,7 +904,7 @@ export const AirportCircuitLab: React.FC = () => {
                   <span className="text-rcac-gold font-bold">C</span> - Carb Heat (HOT as required)
                 </div>
                 <div className="bg-slate-950 p-1.5 rounded border border-slate-800">
-                  <span className="text-rcac-gold font-bold">H</span> - Hatches & Harnesses (Secure)
+                  <span className="text-rcac-gold font-bold">H</span> - Hatches &amp; Harnesses (Secure)
                 </div>
               </div>
             </div>
@@ -760,7 +912,7 @@ export const AirportCircuitLab: React.FC = () => {
             {/* Live Crosswind Calculator */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">
               <h4 className="text-sm font-bold text-white mb-2 font-mono flex items-center justify-between">
-                <span>WIND & RUNWAY SELECTOR</span>
+                <span>WIND & CROSSWIND CALCULATOR</span>
                 <Wind className="w-4 h-4 text-rcac-sky" />
               </h4>
 
@@ -800,9 +952,9 @@ export const AirportCircuitLab: React.FC = () => {
                 {/* Calculation Outputs */}
                 <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1.5">
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Active Runway:</span>
+                    <span className="text-slate-400">Runway in Use:</span>
                     <span className="font-bold text-emerald-400">
-                      Runway {isRunway27Active ? '27' : '09'} (Prefer Headwind)
+                      Runway 27 (fixed for this lesson)
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -818,6 +970,11 @@ export const AirportCircuitLab: React.FC = () => {
                     </span>
                   </div>
                 </div>
+                <p className="text-[10px] text-slate-500 leading-relaxed">
+                  In real flying you land into the wind — for Runway 09 this entire left-hand pattern
+                  mirrors to the north side of the runway. This lesson stays on Runway 27 so every
+                  heading and radio call matches the diagram.
+                </p>
               </div>
             </div>
           </div>
@@ -953,7 +1110,8 @@ export const AirportCircuitLab: React.FC = () => {
               {!quizMode ? (
                 <div className="text-center py-4 space-y-3">
                   <p className="text-xs text-slate-400 max-w-md mx-auto">
-                    Test your instant reaction time! The tower will flash an emergency signal. You must select the correct pilot action before time runs out.
+                    Test your instant reaction time! The tower will flash an emergency signal. You have{' '}
+                    {QUIZ_TIME_LIMIT} seconds to select the correct pilot action before time runs out.
                   </p>
                   <button
                     onClick={() => {
@@ -972,7 +1130,7 @@ export const AirportCircuitLab: React.FC = () => {
                   <div className="space-y-4">
                     <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center gap-4">
                       <div className={`w-12 h-12 rounded-full flex-shrink-0 ${quizQuestion.signal.colorCss}`} />
-                      <div>
+                      <div className="flex-1">
                         <span className="text-xs text-rcac-gold font-mono block">
                           SCENARIO: AIRCRAFT {quizQuestion.scenario === 'inFlight' ? 'IN FLIGHT' : 'ON THE GROUND'}
                         </span>
@@ -980,6 +1138,12 @@ export const AirportCircuitLab: React.FC = () => {
                           Tower directs a <span className="underline decoration-rcac-sky">{quizQuestion.signal.name}</span> beam at your cockpit. What is your required action?
                         </p>
                       </div>
+                      {quizSelectedAnswer === null && (
+                        <span className={`flex items-center gap-1 text-sm font-mono font-bold flex-shrink-0 ${quizTimeLeft <= 3 ? 'text-rose-400' : 'text-amber-300'}`}>
+                          <Clock className="w-4 h-4" />
+                          {quizTimeLeft}s
+                        </span>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 gap-2">
@@ -1014,7 +1178,11 @@ export const AirportCircuitLab: React.FC = () => {
                     {quizSelectedAnswer !== null && (
                       <div className="flex items-center justify-between pt-2">
                         <span className="text-xs font-mono text-slate-400">
-                          {quizSelectedAnswer === quizQuestion.correctAnswer ? (
+                          {quizSelectedAnswer === '__TIMEOUT__' ? (
+                            <span className="text-amber-400 flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5" /> Time expired! Correct action: {quizQuestion.correctAnswer}
+                            </span>
+                          ) : quizSelectedAnswer === quizQuestion.correctAnswer ? (
                             <span className="text-emerald-400 flex items-center gap-1">
                               <CheckCircle className="w-3.5 h-3.5" /> Correct!
                             </span>
@@ -1115,7 +1283,9 @@ export const AirportCircuitLab: React.FC = () => {
                 <div className="p-3 bg-slate-950 rounded-lg border border-slate-800">
                   <span className="font-bold text-emerald-400 font-mono block">Class G (Uncontrolled Airspace)</span>
                   <p className="text-slate-400 text-[11px] mt-1">
-                    ATC has neither authority nor responsibility. Typical gliding and cadet grassroots flying. Cadets broadcast intentions on 123.4 or aerodrome traffic frequency (ATF).
+                    ATC has neither authority nor responsibility. Typical gliding and cadet grassroots flying.
+                    Broadcast intentions on the aerodrome's published ATF/UNICOM (see the CFS) — use 123.4 only
+                    where no frequency is published.
                   </p>
                 </div>
               </div>

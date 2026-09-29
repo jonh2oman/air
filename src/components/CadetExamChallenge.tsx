@@ -22,7 +22,7 @@ export const CADET_QUESTIONS: Question[] = [
     question: 'According to Bernoulli’s Principle, what occurs as air accelerates over the cambered upper surface of an airfoil?',
     options: [
       'Velocity decreases and pressure increases',
-      'Velocity increases and internal pressure decreases, producing lift',
+      'Velocity increases and static pressure decreases, producing lift',
       'Both velocity and pressure remain unchanged',
       'Air temperature increases drastically, causing thermal expansion'
     ],
@@ -117,16 +117,16 @@ export const CADET_QUESTIONS: Question[] = [
   {
     id: 8,
     category: 'Flight Instruments',
-    question: 'What information does the miniature airplane on the Turn Coordinator provide?',
+    question: 'What does the miniature airplane on the Turn Coordinator indicate?',
     options: [
+      'Rate of roll when first moved, then rate of turn once stabilised — never bank angle',
       'Direct pitch attitude relative to the natural horizon',
-      'Angle of bank and rate of roll / rate of turn (standard rate = 3° per second)',
-      'True heading degrees towards magnetic north',
-      'Remaining fuel flow in liters per hour'
+      'Angle of bank currently held in the turn',
+      'True heading in degrees towards magnetic north'
     ],
-    correctIndex: 1,
-    explanation: 'The turn coordinator gyro is canted 30°, allowing it to sense both roll rate and yaw rate. When the wing aligns with the index mark, it indicates a Standard Rate 1 Turn (3° per second, or 360° in 2 minutes).',
-    refGuide: 'RCAC Ground School Notes & TC FTM'
+    correctIndex: 0,
+    explanation: 'The turn coordinator gyro is canted about 30°, so it senses both roll rate and yaw rate. It initially indicates rate of roll, then rate of turn once the turn is stabilised — it never indicates bank angle. When the miniature wing aligns with the index mark, it indicates a Standard Rate Turn (3° per second, 360° in 2 minutes).',
+    refGuide: 'From the Ground Up, Chapter 3 (Instruments)'
   },
   {
     id: 9,
@@ -218,17 +218,17 @@ export const CadetExamChallenge: React.FC = () => {
     soundManager.playClick();
   };
 
-  // Rank / Wings earned based on score
-  const getCadetRank = (scoreVal: number) => {
+  // Unofficial practice score — a 10-question web quiz, never implies any real qualification
+  const getPracticeResult = (scoreVal: number) => {
     const pct = (scoreVal / CADET_QUESTIONS.length) * 100;
-    if (pct === 100) return { title: 'Royal Canadian Air Cadets — Power Pilot Wings (PPTP)', badge: '🎖️ GOLD WINGS', color: 'text-rcac-gold' };
-    if (pct >= 80) return { title: 'Air Cadet Glider Pilot Wings (GPTP Solo Qualified)', badge: '🪂 GLIDER WINGS', color: 'text-rcac-sky' };
-    if (pct >= 60) return { title: 'Flight Sergeant (Aviation Ground School Honour)', badge: '⭐ FLIGHT SERGEANT', color: 'text-emerald-400' };
-    if (pct >= 40) return { title: 'Leading Air Cadet (Aviation Enthusiast)', badge: '✈️ LEADING AIR CADET', color: 'text-blue-400' };
-    return { title: 'Air Cadet Recruit (Ground School Student)', badge: '🔰 CADET RECRUIT', color: 'text-slate-400' };
+    if (pct === 100) return { title: `Practice score ${scoreVal}/10 — perfect study session!`, badge: '⭐ PERFECT SCORE', color: 'text-rcac-gold' };
+    if (pct >= 80) return { title: `Practice score ${scoreVal}/10 — great study session!`, badge: '✅ STRONG REVIEW', color: 'text-rcac-sky' };
+    if (pct >= 60) return { title: `Practice score ${scoreVal}/10 — good review session`, badge: '📘 GOOD REVIEW', color: 'text-emerald-400' };
+    if (pct >= 40) return { title: `Practice score ${scoreVal}/10 — keep studying`, badge: '📝 KEEP STUDYING', color: 'text-blue-400' };
+    return { title: `Practice score ${scoreVal}/10 — review the notes and retake`, badge: '🔰 MORE STUDY NEEDED', color: 'text-slate-400' };
   };
 
-  const rankInfo = getCadetRank(score);
+  const resultInfo = getPracticeResult(score);
 
   return (
     <div className="space-y-6">
@@ -240,10 +240,10 @@ export const CadetExamChallenge: React.FC = () => {
           </div>
           <div>
             <h2 className="text-xl font-bold text-white tracking-wide">
-              Module 6: RCAC Cadet Ground School Exam & Wings Challenge
+              Module 6: RCAC Ground School Practice Exam
             </h2>
             <p className="text-sm text-slate-400">
-              Transport Canada & Air Cadet Gliding Program (GPTP/PPTP) Practice Exam
+              Unofficial practice questions — not affiliated with Transport Canada or RCAC
             </p>
           </div>
         </div>
@@ -343,7 +343,7 @@ export const CadetExamChallenge: React.FC = () => {
           {/* Footer Action Buttons */}
           <div className="flex justify-between items-center pt-2">
             <span className="text-xs text-slate-500 font-mono">
-              Passing standard: 60% (Transport Canada PSTAR/GPTP)
+              Transport Canada PSTAR pass mark: 90% (45/50)
             </span>
 
             {!isAnswered ? (
@@ -360,14 +360,14 @@ export const CadetExamChallenge: React.FC = () => {
                 onClick={handleNext}
                 className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-sm transition shadow-lg flex items-center gap-2"
               >
-                <span>{currentIndex + 1 === CADET_QUESTIONS.length ? 'View Results & Wings' : 'Next Question'}</span>
+                <span>{currentIndex + 1 === CADET_QUESTIONS.length ? 'View Results' : 'Next Question'}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             )}
           </div>
         </div>
       ) : (
-        /* Results & Wings Certificate View */
+        /* Results View */
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl text-center space-y-6 max-w-2xl mx-auto">
           <div className="p-4 bg-rcac-blue/50 border border-rcac-sky/40 rounded-full w-24 h-24 mx-auto flex items-center justify-center text-rcac-gold shadow-2xl">
             <Award className="w-12 h-12" />
@@ -375,7 +375,7 @@ export const CadetExamChallenge: React.FC = () => {
 
           <div className="space-y-2">
             <span className="text-xs font-mono uppercase tracking-widest text-slate-400">
-              Exam Debrief & Qualification
+              Exam Debrief & Results
             </span>
             <h3 className="text-2xl font-bold text-white">
               Cadet Ground School Completed!
@@ -385,20 +385,26 @@ export const CadetExamChallenge: React.FC = () => {
             </div>
           </div>
 
-          {/* Wings Award Badge */}
+          {/* Practice Score Badge */}
           <div className="p-5 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
-            <span className={`text-sm font-bold font-mono ${rankInfo.color} block`}>
-              {rankInfo.badge}
+            <span className={`text-sm font-bold font-mono ${resultInfo.color} block`}>
+              {resultInfo.badge}
             </span>
             <div className="text-lg font-bold text-white">
-              {rankInfo.title}
+              {resultInfo.title}
             </div>
             <p className="text-xs text-slate-400">
               {score >= 8
-                ? 'Congratulations Cadet! You have demonstrated exceptional aeronautical knowledge meeting Royal Canadian Air Cadets flight requirements.'
-                : 'Good effort Cadet! Review the flight notes, wind tunnel simulations, and instruments, then re-take the exam to upgrade your wings!'}
+                ? 'Great practice session! Remember, this is a 10-question review — not a real exam.'
+                : 'Good effort! Review the flight notes, wind tunnel simulations, and instruments, then re-take the practice exam.'}
             </p>
           </div>
+
+          {/* Disclaimer */}
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            Unofficial study aid only — not affiliated with Transport Canada or the Royal Canadian Air Cadets.
+            This app confers no qualification, rank, wings, or selection credit.
+          </p>
 
           <div className="pt-2">
             <button

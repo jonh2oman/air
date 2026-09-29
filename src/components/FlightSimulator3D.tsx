@@ -18,6 +18,9 @@ import {
 } from 'lucide-react';
 import { soundManager } from '../utils/audio';
 
+// Reused scratch vector for the chase camera (avoids a per-frame allocation)
+const chaseTargetVec = new THREE.Vector3();
+
 type FlightScenario = 'takeoff' | 'landing' | 'circuit' | 'glider-winch';
 type CameraMode = 'cockpit' | 'chase';
 
@@ -83,6 +86,10 @@ export const FlightSimulator3D: React.FC = () => {
 
   // PAPI Light status: 0 (all red) to 4 (all white)
   const [papiLights, setPapiLights] = useState<[boolean, boolean, boolean, boolean]>([false, false, false, false]);
+  // PAPI indicator is only shown when established on final near the touchdown point
+  const [papiVisible, setPapiVisible] = useState<boolean>(false);
+  // Visible notice when the GLB aircraft model fails to load (procedural backup in use)
+  const [modelLoadError, setModelLoadError] = useState<string | null>(null);
   const [stickOffset, setStickOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Virtual Controls
@@ -223,14 +230,15 @@ export const FlightSimulator3D: React.FC = () => {
       };
       controlInputs.current.throttleInput = 0;
     } else if (scen === 'landing') {
-      // 3 Nautical miles final on 3 degree glide path
-      // 800 ft AGL (~243 m), speed 65 knots (~33.4 m/s)
+      // True 3 NM final on a 3° glide path to the touchdown point (Z = 700):
+      // 3 NM = 5556 m → Z = 700 + 5556 = 6256; height = 5556 × tan(3°) ≈ 291 m ≈ 955 ft AGL
+      // Speed 65 knots (~33.4 m/s); 3° sink ≈ 1.75 m/s (~344 fpm)
       newState = {
         x: 0,
-        y: 180,
-        z: 3200,
+        y: 291,
+        z: 6256,
         vx: 0,
-        vy: -2.0,
+        vy: -1.75,
         vz: -33.4,
         pitch: 0.035, // Flared attitude (~2 deg nose up) with 20 deg flaps
         roll: 0,
@@ -242,8 +250,8 @@ export const FlightSimulator3D: React.FC = () => {
         flaps: 20,
         brakes: false,
         airspeed: 65,
-        altitudeFt: 590,
-        vsiFpm: -500,
+        altitudeFt: 955,
+        vsiFpm: -344,
         headingDeg: 270,
         stallWarning: false,
         onGround: false,
@@ -445,6 +453,7 @@ export const FlightSimulator3D: React.FC = () => {
   // Main Three.js Scene Setup & Physics Animation Loop
   useEffect(() => {
     if (!containerRef.current) return;
+    setModelLoadError(null); // clear any previous model-load failure notice
     const width = containerRef.current.clientWidth;
     const height = containerRef.current.clientHeight;
 
@@ -638,7 +647,8 @@ export const FlightSimulator3D: React.FC = () => {
 
     // Load actual GLB Model (C172 or Glider)
     const loader = new GLTFLoader();
-    const modelUrl = aircraftType === 'c172' ? '/c172.glb' : '/glider.glb';
+    // BASE_URL-relative so models resolve under the GitHub Pages /air/ sub-path
+    const modelUrl = `${import.meta.env.BASE_URL}${aircraftType === 'c172' ? 'c172.glb' : 'glider.glb'}`;
 
     loader.load(
       modelUrl,
@@ -730,6 +740,7 @@ export const FlightSimulator3D: React.FC = () => {
       undefined,
       (err) => {
         console.warn('Could not load 3D GLB, using procedural aircraft:', err);
+        setModelLoadError(`3D model failed to load (${modelUrl}) — showing simplified backup aircraft.`);
       }
     );
 
@@ -757,6 +768,9 @@ export const FlightSimulator3D: React.FC = () => {
     // ============================================
     let lastTime = performance.now();
     let animationFrameId: number;
+    let frameCount = 0; // deterministic telemetry throttle (every 4th frame)
+    let prevPapiKey = ''; // avoids redundant PAPI React state updates
+    let stallLatched = false; // AoA stall hysteresis state
 
     const animate = (currentTime: number) => {
       animationFrameId = requestAnimationFrame(animate);
@@ -784,9 +798,14 @@ export const FlightSimulator3D: React.FC = () => {
         const aoaRad = state.pitch - flightPathAngle;
         const aoaDeg = (aoaRad * 180) / Math.PI;
 
-        // Stall behavior: Stall angle approx 15 degrees
-        const isStalled = aoaDeg > 15 || (airspeedKts < (isGlider ? 34 : 45) && !state.onGround);
-        soundManager.setStallHorn(isStalled && !state.onGround);
+        // A stall is exceeding the critical angle of attack (~15°) — not a speed.
+        // Hysteresis (engage above 15°, recover below 12°) stops flicker at the boundary.
+        if (aoaDeg > 15) stallLatched = true;
+        else if (aoaDeg < 12) stallLatched = false;
+        const isStalled = stallLatched;
+        // The stall WARNING is driven by low airspeed margin, like real warning systems
+        const lowSpeedWarning = airspeedKts < (isGlider ? 44 : 55) && !state.onGround;
+        soundManager.setStallHorn((isStalled || lowSpeedWarning) && !state.onGround);
 
         // Lift Coefficient (CL)
         let cl = 0.25 + 0.08 * aoaDeg + (state.flaps / 30) * 0.4;
@@ -812,8 +831,13 @@ export const FlightSimulator3D: React.FC = () => {
           // Cessna 172 Engine: 180 HP (~134 kW), max thrust ~3,200 N at takeoff
           const maxThrust = 3200;
           thrust = (inputs.throttleInput / 100) * maxThrust * Math.max(0.3, 1 - airspeedKts / 150);
-        } else if (scenario === 'glider-winch' && state.y < 450 && state.status === 'flying') {
-          // Winch launch provides powerful towing acceleration
+        } else if (
+          scenario === 'glider-winch' &&
+          state.y < 450 &&
+          (state.status === 'flying' || (state.status === 'ready' && state.onGround))
+        ) {
+          // Winch launch: the winch pulls from 'ready' on the ground (otherwise the
+          // glider could never reach flying speed), and keeps pulling until release altitude
           thrust = 4200;
         }
 
@@ -902,6 +926,12 @@ export const FlightSimulator3D: React.FC = () => {
           ax = (thrustX + dragX + liftHorizontal * cosYaw) / mass;
           az = (thrustZ + dragZ - liftHorizontal * sinYaw) / mass;
 
+          // Coordinated turn: banked lift curves the flight path — turn rate ω = g·tan(bank) / V.
+          // Bank right is roll < 0; a right bank turns right (heading increases, so yaw decreases).
+          const bankAngle = THREE.MathUtils.clamp(-state.roll, -1.2, 1.2);
+          const coordTurnRate = (g * Math.tan(bankAngle)) / Math.max(vTotal, 10);
+          state.yaw -= coordTurnRate * dt;
+
           state.vx += ax * dt;
           state.vy += ay * dt;
           state.vz += az * dt;
@@ -913,7 +943,7 @@ export const FlightSimulator3D: React.FC = () => {
             soundManager.playTouchdown();
 
             let feedback = '';
-            if (touchdownFpm > -200) {
+            if (touchdownFpm > -100) {
               feedback = '🌟 Greaser! Textbook smooth landing (-' + Math.round(Math.abs(touchdownFpm)) + ' fpm)';
               state.status = 'landed';
             } else if (touchdownFpm > -450) {
@@ -943,11 +973,53 @@ export const FlightSimulator3D: React.FC = () => {
         state.vsiFpm = Math.round(state.vy * 196.85);
         state.headingDeg = Math.round((270 - (state.yaw * 180) / Math.PI + 360) % 360);
         state.throttle = Math.round(inputs.throttleInput);
-        state.stallWarning = isStalled && !state.onGround;
+        state.stallWarning = (isStalled || lowSpeedWarning) && !state.onGround;
 
-        // Update React State for UI HUD (throttled every 4 frames)
-        if (Math.random() < 0.25) {
+        // Update React State for UI HUD (throttled: every 4th frame ≈ 15 Hz)
+        frameCount++;
+        if (frameCount % 4 === 0) {
           setTelemetry({ ...state });
+
+          // --- PAPI GLIDE SLOPE EVALUATION (throttled with telemetry) ---
+          // Only meaningful when established on final within range of the touchdown point
+          const distToTouchdown = Math.sqrt(
+            state.x * state.x + (state.z - touchdownZ) * (state.z - touchdownZ)
+          );
+          const yawNorm = Math.atan2(Math.sin(state.yaw), Math.cos(state.yaw));
+          const papiActive =
+            !state.onGround &&
+            state.z > touchdownZ - 150 &&
+            state.z <= touchdownZ + 6000 &&
+            Math.abs(state.x) <= 120 &&
+            Math.abs(yawNorm) < 0.3; // roughly aligned with Runway 27 final
+
+          let lights: [boolean, boolean, boolean, boolean] = [false, false, false, false]; // false = red, true = white
+          if (papiActive) {
+            const glideAngleDeg = (Math.atan2(state.y, Math.max(10, distToTouchdown)) * 180) / Math.PI;
+            if (glideAngleDeg > 3.5) {
+              lights = [true, true, true, true]; // 4 White: Too high
+            } else if (glideAngleDeg >= 3.2) {
+              lights = [true, true, true, false]; // 3 White, 1 Red: Slightly high
+            } else if (glideAngleDeg >= 2.8) {
+              lights = [true, true, false, false]; // 2 White, 2 Red: ON GLIDE SLOPE (3 deg)
+            } else if (glideAngleDeg >= 2.5) {
+              lights = [true, false, false, false]; // 1 White, 3 Red: Slightly low
+            } else {
+              lights = [false, false, false, false]; // 4 Red: Too low
+            }
+          }
+
+          // Only push React state / touch 3D lenses when something actually changed
+          const papiKey = (papiActive ? 'on:' : 'off:') + lights.map((l) => (l ? '1' : '0')).join('');
+          if (papiKey !== prevPapiKey) {
+            prevPapiKey = papiKey;
+            setPapiLights(lights);
+            setPapiVisible(papiActive);
+            papiMeshes.forEach((mesh, idx) => {
+              const mat = mesh.material as THREE.MeshBasicMaterial;
+              mat.color.setHex(!papiActive ? 0x475569 : lights[idx] ? 0xffffff : 0xef4444);
+            });
+          }
         }
 
         // --- 2. UPDATE 3D GRAPHICS POSITION & ROTATION ---
@@ -999,34 +1071,7 @@ export const FlightSimulator3D: React.FC = () => {
           }
         }
 
-        // --- 3. PAPI GLIDE SLOPE EVALUATION ---
-        // PAPI touchdown point is at X = 0, Y = 0, Z = touchdownZ (700)
-        const distToTouchdown = Math.sqrt(
-          (state.x - 0) * (state.x - 0) + (state.z - touchdownZ) * (state.z - touchdownZ)
-        );
-        const glideAngleDeg = (Math.atan2(state.y, Math.max(10, distToTouchdown)) * 180) / Math.PI;
-
-        let lights: [boolean, boolean, boolean, boolean] = [false, false, false, false]; // false = red, true = white
-        if (glideAngleDeg > 3.5) {
-          lights = [true, true, true, true]; // 4 White: Too high
-        } else if (glideAngleDeg >= 3.2) {
-          lights = [true, true, true, false]; // 3 White, 1 Red: Slightly high
-        } else if (glideAngleDeg >= 2.8) {
-          lights = [true, true, false, false]; // 2 White, 2 Red: ON GLIDE SLOPE (3 deg)
-        } else if (glideAngleDeg >= 2.5) {
-          lights = [true, false, false, false]; // 1 White, 3 Red: Slightly low
-        } else {
-          lights = [false, false, false, false]; // 4 Red: Too low
-        }
-        setPapiLights(lights);
-
-        // Update 3D PAPI visual colors
-        papiMeshes.forEach((mesh, idx) => {
-          const mat = mesh.material as THREE.MeshBasicMaterial;
-          mat.color.setHex(lights[idx] ? 0xffffff : 0xef4444);
-        });
-
-        // --- 4. CAMERA UPDATE ---
+        // --- 3. CAMERA UPDATE ---
         if (cameraMode === 'cockpit') {
           // Pilot's Eye Cockpit View
           camera.position.set(state.x, state.y + 1.2, state.z);
@@ -1042,7 +1087,8 @@ export const FlightSimulator3D: React.FC = () => {
           const targetCamY = state.y + chaseHeight;
           const targetCamZ = state.z + Math.cos(state.yaw) * chaseDist;
 
-          camera.position.lerp(new THREE.Vector3(targetCamX, targetCamY, targetCamZ), 10 * dt);
+          chaseTargetVec.set(targetCamX, targetCamY, targetCamZ);
+          camera.position.lerp(chaseTargetVec, 10 * dt);
           camera.lookAt(state.x, state.y + 1.5, state.z);
         }
       }
@@ -1193,6 +1239,14 @@ export const FlightSimulator3D: React.FC = () => {
         {/* Three.js Canvas Container */}
         <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
+        {/* Visible notice when the 3D model fails to load (procedural backup in use) */}
+        {modelLoadError && (
+          <div className="absolute top-0 inset-x-0 z-10 bg-amber-500/95 text-slate-950 text-[11px] font-mono font-semibold px-4 py-1.5 flex items-center justify-center gap-2">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            <span>{modelLoadError}</span>
+          </div>
+        )}
+
         {/* ======================================================== */}
         {/* HEADS-UP DISPLAY (HUD) FLIGHT OVERLAY */}
         {/* ======================================================== */}
@@ -1217,7 +1271,8 @@ export const FlightSimulator3D: React.FC = () => {
                 </span>
               </div>
 
-              {/* Working PAPI Lights Indicator */}
+              {/* Working PAPI Lights Indicator (only shown when established on final) */}
+              {papiVisible && (
               <div className="bg-slate-950/85 backdrop-blur-md px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-2">
                 <span className="text-[10px] text-slate-400 font-mono">PAPI GLIDE PATH:</span>
                 <div className="flex items-center gap-1.5">
@@ -1238,6 +1293,7 @@ export const FlightSimulator3D: React.FC = () => {
                     : '(LOW)'}
                 </span>
               </div>
+              )}
             </div>
 
             {/* Altimeter Gauge Tape (Right) */}
@@ -1265,7 +1321,7 @@ export const FlightSimulator3D: React.FC = () => {
             {telemetry.stallWarning && (
               <div className="absolute -top-12 bg-rose-600/90 text-white font-mono font-bold px-4 py-1.5 rounded-lg border-2 border-white animate-bounce shadow-2xl flex items-center gap-2">
                 <AlertTriangle className="w-5 h-5 text-amber-300" />
-                <span>STALL WARNING! LOWER NOSE / FULL POWER</span>
+                <span>{aircraftType === 'glider' ? 'STALL WARNING! LOWER THE NOSE' : 'STALL WARNING! LOWER NOSE / FULL POWER'}</span>
               </div>
             )}
 

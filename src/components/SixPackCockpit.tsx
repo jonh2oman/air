@@ -14,18 +14,23 @@ import { soundManager } from '../utils/audio';
 
 export const SixPackCockpit: React.FC = () => {
   const [instruments, setInstruments] = useState<InstrumentState>({
-    indicatedAirspeed: 75,
-    pitchAngle: 2,
-    bankAngle: 0,
+    indicatedAirspeed: 100,
     altitude: 2500,
     verticalSpeed: 0,
+    trueAirspeed: 100,
+    trueAltitude: 2500,
+    trueVsi: 0,
+    pitchAngle: 2,
+    bankAngle: 0,
     heading: 360,
     altimeterSetting: 29.92,
     headingBug: 360,
     engineRpm: 2300,
     flapSetting: 0,
-    pitotBlocked: false,
+    pitotFault: 'none',
     staticBlocked: false,
+    blockRefAlt: null,
+    blockRefIas: null,
     turnRate: 0,
     slipSkid: 0,
   });
@@ -33,46 +38,88 @@ export const SixPackCockpit: React.FC = () => {
   const [activeScenario, setActiveScenario] = useState<string>('level');
   const [showGuideModal, setShowGuideModal] = useState<boolean>(false);
 
-  // Compute flight physics loop
+  // Compute flight physics loop.
+  // Golden rule: the AIRCRAFT keeps flying on TRUE values; the DIALS show
+  // INDICATED values, which lie when the pitot-static system is compromised.
   useEffect(() => {
     const timer = setInterval(() => {
       setInstruments((prev) => {
-        // Vertical speed calculation from pitch and throttle
+        // ---------- TRUE aircraft state (faults never touch this) ----------
         const targetVsi = (prev.pitchAngle - 2) * 220 + (prev.engineRpm - 2300) * 0.4;
-        const smoothedVsi = prev.staticBlocked ? 0 : prev.verticalSpeed + (targetVsi - prev.verticalSpeed) * 0.15;
+        const trueVsi = prev.trueVsi + (targetVsi - prev.trueVsi) * 0.15;
+        const trueAlt = Math.max(0, prev.trueAltitude + (trueVsi / 60) * 0.1);
 
-        // Altitude integration
-        const altDelta = prev.staticBlocked ? 0 : (smoothedVsi / 60) * 0.1;
-        const newAlt = Math.max(0, prev.altitude + altDelta);
-
-        // Turn rate and heading integration
-        // Standard rate turn = 3 deg/sec at bank angle ~15% for typical light aircraft
-        const targetTurnRate = (prev.bankAngle / 15) * 3;
+        // Turn rate from the coordinated-turn formula: ω = g·tan(bank) / V
+        const bankRad = (prev.bankAngle * Math.PI) / 180;
+        const vFps = Math.max(40, prev.trueAirspeed * 1.68781);
+        const targetTurnRate = ((32.2 * Math.tan(bankRad)) / vFps) * (180 / Math.PI); // deg/sec
         const newTurnRate = prev.turnRate + (targetTurnRate - prev.turnRate) * 0.2;
-        let newHeading = (prev.heading + (newTurnRate * 0.1)) % 360;
+        let newHeading = (prev.heading + newTurnRate * 0.1) % 360;
         if (newHeading < 0) newHeading += 360;
 
-        // Slip/skid ball dynamics: coordinated when ball is centered (0)
-        const slip = Math.max(-1, Math.min(1, (prev.bankAngle / 45) * 0.3));
+        // TRUE airspeed seeks the trim speed for this pitch + power (like a real aircraft)
+        const targetAsi = Math.max(
+          0,
+          110 - prev.pitchAngle * 4.5 + (prev.engineRpm - 2300) * 0.02 - (prev.flapSetting / 10) * 3
+        );
+        const trueAsi = prev.trueAirspeed + (targetAsi - prev.trueAirspeed) * 0.1;
 
-        // Airspeed calculation (pitot-static effects)
-        let computedAirspeed = prev.indicatedAirspeed;
-        if (prev.pitotBlocked) {
-          // Blocked pitot tube acts as an altimeter!
-          computedAirspeed = 70 + (newAlt - 2500) * 0.02;
-        } else {
-          // Normal airspeed responds inversely to pitch and directly to power
-          const targetAsi = Math.max(0, 110 - prev.pitchAngle * 4.5 + (prev.engineRpm - 2300) * 0.02 - (prev.flapSetting / 10) * 3);
-          computedAirspeed = prev.indicatedAirspeed + (targetAsi - prev.indicatedAirspeed) * 0.1;
+        // ---------- Fault references (captured once, at the moment of failure) ----------
+        const needRef = prev.staticBlocked || prev.pitotFault === 'ram-drain';
+        let refAlt = prev.blockRefAlt;
+        let refIas = prev.blockRefIas;
+        if (needRef && refAlt === null) {
+          refAlt = prev.trueAltitude;
+          refIas = prev.trueAirspeed;
+        } else if (!needRef) {
+          refAlt = null;
+          refIas = null;
         }
+
+        // ---------- INDICATED values (what the dials show) ----------
+        // Altimeter & VSI: frozen when the static port is blocked
+        const indAlt = prev.staticBlocked && refAlt !== null ? refAlt : trueAlt;
+        const indVsi = prev.staticBlocked ? 0 : trueVsi;
+
+        // Airspeed indicator: pitot minus static, per the fault in play
+        let indAsi: number;
+        if (prev.pitotFault === 'ram') {
+          // Ram blocked, drain OPEN: pressure leaks out the drain hole → ASI falls toward zero
+          indAsi = prev.indicatedAirspeed * 0.93;
+        } else if (prev.pitotFault === 'ram-drain' && refAlt !== null && refIas !== null) {
+          if (prev.staticBlocked) {
+            // Both sides trapped: needle frozen at the trapped value
+            indAsi = refIas;
+          } else {
+            // Ram + drain blocked: trapped pitot pressure vs live static → ASI acts as an altimeter
+            // (climb → over-reads, descent → under-reads)
+            indAsi = Math.max(0, Math.min(220, refIas + (refAlt - trueAlt) * 0.06));
+          }
+        } else if (prev.staticBlocked && refAlt !== null) {
+          // Static blocked, pitot normal: trapped static vs live pitot
+          // (climb → under-reads, descent → over-reads)
+          indAsi = Math.max(0, Math.min(220, trueAsi - (trueAlt - refAlt) * 0.06));
+        } else {
+          indAsi = trueAsi;
+        }
+
+        // Slip/skid ball: centered in a stabilized coordinated turn; deflects only
+        // while the turn rate is catching up to the bank (adverse yaw / no rudder yet).
+        // A steady banked turn does NOT hold the ball out — that was the old error.
+        const slip = Math.max(-1, Math.min(1, (targetTurnRate - newTurnRate) * 0.35));
 
         return {
           ...prev,
-          verticalSpeed: smoothedVsi,
-          altitude: newAlt,
+          trueVsi,
+          trueAltitude: trueAlt,
+          trueAirspeed: trueAsi,
+          blockRefAlt: refAlt,
+          blockRefIas: refIas,
+          verticalSpeed: indVsi,
+          altitude: indAlt,
           turnRate: newTurnRate,
           heading: newHeading,
-          indicatedAirspeed: computedAirspeed,
+          indicatedAirspeed: indAsi,
           slipSkid: slip,
         };
       });
@@ -81,7 +128,8 @@ export const SixPackCockpit: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  // Quick Flight Presets
+  // Quick Flight Presets — each sets a pitch/power combo whose natural trim
+  // speed matches the target, so the preset holds instead of drifting away.
   const applyScenario = (name: string) => {
     soundManager.playClick();
     setActiveScenario(name);
@@ -90,16 +138,19 @@ export const SixPackCockpit: React.FC = () => {
         ...prev,
         pitchAngle: 2,
         bankAngle: 0,
-        indicatedAirspeed: 95,
+        indicatedAirspeed: 100,
+        trueAirspeed: 100,
         engineRpm: 2350,
         verticalSpeed: 0,
+        trueVsi: 0,
       }));
     } else if (name === 'climb') {
       setInstruments((prev) => ({
         ...prev,
         pitchAngle: 8,
         bankAngle: 0,
-        indicatedAirspeed: 74, // Vy best rate of climb
+        indicatedAirspeed: 78, // Vy best rate of climb
+        trueAirspeed: 78,
         engineRpm: 2500,
       }));
     } else if (name === 'steep-turn') {
@@ -107,16 +158,18 @@ export const SixPackCockpit: React.FC = () => {
         ...prev,
         pitchAngle: 4,
         bankAngle: 45,
-        indicatedAirspeed: 85,
+        indicatedAirspeed: 95,
+        trueAirspeed: 95,
         engineRpm: 2450,
       }));
     } else if (name === 'approach') {
       setInstruments((prev) => ({
         ...prev,
-        pitchAngle: -3,
+        pitchAngle: 3,
         bankAngle: 0,
-        indicatedAirspeed: 65,
-        engineRpm: 1500,
+        indicatedAirspeed: 70,
+        trueAirspeed: 70,
+        engineRpm: 1450,
         flapSetting: 30,
       }));
     }
@@ -185,7 +238,7 @@ export const SixPackCockpit: React.FC = () => {
           <div className="bg-slate-900 border-2 border-slate-700 rounded-2xl p-4 flex flex-col items-center shadow-xl relative overflow-hidden">
             <div className="text-[11px] font-mono font-bold text-slate-300 uppercase tracking-widest mb-2 flex items-center gap-1.5">
               <span>AIRSPEED (KIAS)</span>
-              {instruments.pitotBlocked && <span className="text-[9px] text-rose-400 bg-rose-950/60 px-1 rounded">PITOT BLK</span>}
+              {instruments.pitotFault !== 'none' && <span className="text-[9px] text-rose-400 bg-rose-950/60 px-1 rounded">PITOT FAULT</span>}
             </div>
 
             {/* SVG ASI Gauge */}
@@ -700,27 +753,42 @@ export const SixPackCockpit: React.FC = () => {
               <ShieldAlert className="w-4 h-4 text-rose-400" />
             </h4>
             <p className="text-slate-400 text-[11px]">
-              Simulate icing or insect blockage in the pitot-static system as taught in Canadian Ground School:
+              Simulate icing or insect blockage as taught in Canadian ground school. <strong className="text-slate-300">The aircraft keeps flying — only the dials lie.</strong> Cross-check to survive.
             </p>
 
-            <div className="space-y-2 pt-1">
-              <button
-                onClick={() => {
-                  setInstruments((prev) => ({ ...prev, pitotBlocked: !prev.pitotBlocked }));
-                  soundManager.playClick();
-                }}
-                className={`w-full py-2 px-3 rounded-lg text-left font-semibold border flex items-center justify-between transition ${
-                  instruments.pitotBlocked
-                    ? 'bg-rose-500/20 border-rose-500 text-rose-400'
-                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
-                }`}
-              >
-                <span>Pitot Tube Blockage (Ram Air Block)</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-950">
-                  {instruments.pitotBlocked ? 'ACTIVE FAILURE' : 'NORMAL'}
-                </span>
-              </button>
+            {/* Pitot faults: three canonical signatures */}
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">Pitot tube</p>
+              {[
+                { id: 'none' as const, label: 'Normal', hint: 'ASI reads true' },
+                { id: 'ram' as const, label: 'Ram blocked, drain open', hint: 'ASI falls toward zero' },
+                { id: 'ram-drain' as const, label: 'Ram + drain blocked', hint: 'ASI acts as an altimeter' },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  onClick={() => {
+                    setInstruments((prev) => ({ ...prev, pitotFault: opt.id }));
+                    soundManager.playClick();
+                  }}
+                  className={`w-full py-2 px-3 rounded-lg text-left border flex items-center justify-between transition ${
+                    instruments.pitotFault === opt.id
+                      ? opt.id === 'none'
+                        ? 'bg-emerald-500/15 border-emerald-500 text-emerald-300'
+                        : 'bg-rose-500/20 border-rose-500 text-rose-300'
+                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
+                  }`}
+                >
+                  <span className="text-sm font-semibold">{opt.label}</span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-950 text-slate-400">
+                    {opt.hint}
+                  </span>
+                </button>
+              ))}
+            </div>
 
+            {/* Static port fault */}
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">Static port</p>
               <button
                 onClick={() => {
                   setInstruments((prev) => ({ ...prev, staticBlocked: !prev.staticBlocked }));
@@ -728,16 +796,44 @@ export const SixPackCockpit: React.FC = () => {
                 }}
                 className={`w-full py-2 px-3 rounded-lg text-left font-semibold border flex items-center justify-between transition ${
                   instruments.staticBlocked
-                    ? 'bg-rose-500/20 border-rose-500 text-rose-400'
+                    ? 'bg-rose-500/20 border-rose-500 text-rose-300'
                     : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
                 }`}
               >
-                <span>Static Port Blockage</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-950">
-                  {instruments.staticBlocked ? 'ACTIVE FAILURE' : 'NORMAL'}
+                <span className="text-sm">Static port blocked</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-950 text-slate-400">
+                  {instruments.staticBlocked ? 'ALT & VSI FROZEN' : 'NORMAL'}
                 </span>
               </button>
             </div>
+
+            {/* Truth strip: true vs indicated while any fault is active */}
+            {(instruments.pitotFault !== 'none' || instruments.staticBlocked) && (
+              <div className="bg-amber-950/40 border border-amber-700/50 rounded-lg p-3 space-y-1">
+                <p className="text-[10px] font-mono text-amber-400 uppercase tracking-wider font-bold">
+                  ⚠ Truth check — what the aircraft is really doing
+                </p>
+                <div className="grid grid-cols-3 gap-2 text-center font-mono text-[11px]">
+                  <div>
+                    <p className="text-slate-500">TRUE ALT</p>
+                    <p className="text-white font-bold">{Math.round(instruments.trueAltitude)} ft</p>
+                    <p className="text-slate-500">DIAL: {Math.round(instruments.altitude)} ft</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">TRUE SPD</p>
+                    <p className="text-white font-bold">{Math.round(instruments.trueAirspeed)} kt</p>
+                    <p className="text-slate-500">DIAL: {Math.round(instruments.indicatedAirspeed)} kt</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">TRUE VSI</p>
+                    <p className="text-white font-bold">
+                      {instruments.trueVsi > 0 ? '+' : ''}{Math.round(instruments.trueVsi)} fpm
+                    </p>
+                    <p className="text-slate-500">DIAL: {Math.round(instruments.verticalSpeed)} fpm</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -770,11 +866,22 @@ export const SixPackCockpit: React.FC = () => {
               </div>
 
               <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+                <h4 className="font-bold text-rose-400 mb-1">Pitot-Static Failures: Know the Three Signatures</h4>
+                <p>
+                  <strong>1. Ram blocked, drain open</strong> (ice over the pitot mouth): ram pressure leaks out the drain hole → the ASI falls toward <strong>zero</strong> and stays there.
+                  <br /><strong>2. Ram + drain both blocked:</strong> pitot pressure is trapped at its last value while static pressure keeps changing → the ASI <strong>acts as an altimeter</strong>: it over-reads in a climb and under-reads in a descent.
+                  <br /><strong>3. Static port blocked:</strong> the <strong>altimeter freezes</strong> at the blockage altitude and the <strong>VSI reads zero</strong>. The ASI's static side is trapped too, so it <strong>under-reads in a climb</strong> and <strong>over-reads in a descent</strong>.
+                  <br />In every case the aircraft itself keeps flying normally — only the indications are wrong. That is why you cross-check: pitch + power + a second instrument.
+                </p>
+              </div>
+
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
                 <h4 className="font-bold text-emerald-400 mb-1">Gyroscopic System (Attitude, Heading, Turn Coordinator)</h4>
                 <p>
                   Operates on two fundamental properties of spinning gyros:
                   <br />1. <strong>Rigidity in Space:</strong> Used in the Attitude Indicator and Heading Indicator to maintain fixed orientation relative to the universe.
                   <br />2. <strong>Precession:</strong> When a force is applied to a gyro, the reaction occurs 90° later in the direction of rotation. Used in the Turn Coordinator.
+                  <br />The inclinometer <strong>ball stays centered in a stabilized coordinated turn</strong> — turn rate follows ω = g·tan(bank)/V. The ball only swings while the turn is uncoordinated (e.g. rolling in without rudder): step on the ball to re-coordinate.
                 </p>
               </div>
 

@@ -27,18 +27,23 @@ export const AerodynamicsLab: React.FC = () => {
 
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [showTheoryModal, setShowTheoryModal] = useState(false);
+  const [altitudeFt, setAltitudeFt] = useState(0); // pressure altitude driving air density
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Aerodynamic calculations
-  // Stall angle is typically around 16 deg for clean wing, 14 deg with full flaps
-  const criticalAoA = 16 - (state.flaps / 40) * 2;
+  // Aerodynamic calculations — ILLUSTRATIVE MODEL (not flight-manual data).
+  // The 2-33A carries SPOILERS (destroy lift, add drag); the C172 carries FLAPS
+  // (add lift and drag, lower the stall speed). They are opposite devices.
+  const isGlider = state.aircraftType === 'glider';
+  // Stall angle is typically around 16 deg for a clean wing; C172 flaps lower it,
+  // 2-33A spoilers leave the critical angle essentially unchanged.
+  const criticalAoA = isGlider ? 16 : 16 - (state.flaps / 40) * 2;
   const isStalled = state.angleOfAttack > criticalAoA;
   const isNearStall = !isStalled && state.angleOfAttack >= criticalAoA - 3;
 
-  // Cl calculation: linear slope ~0.11 per degree, with camber & flap offset
+  // Cl calculation: linear slope ~0.1 per degree, with camber & flap offset
   const camberClOffset = (state.camber / 4) * 0.3;
-  const flapClOffset = (state.flaps / 40) * 0.55;
-  
+  const flapClOffset = isGlider ? 0 : (state.flaps / 40) * 0.55;
+
   let cl = 0;
   if (state.angleOfAttack <= criticalAoA) {
     cl = 0.1 * (state.angleOfAttack + 2) + camberClOffset + flapClOffset;
@@ -47,11 +52,15 @@ export const AerodynamicsLab: React.FC = () => {
     const postStallDiff = state.angleOfAttack - criticalAoA;
     cl = Math.max(0.2, (0.1 * (criticalAoA + 2) + camberClOffset + flapClOffset) * Math.exp(-postStallDiff * 0.15));
   }
+  if (isGlider && state.flaps > 0) {
+    // Spoilers kill lift: up to ~55% CL reduction at full deployment
+    cl *= 1 - (state.flaps / 40) * 0.55;
+  }
   cl = Math.max(-0.5, Math.min(2.4, cl));
 
   // Cd calculation: parasitic drag + induced drag (Cl^2 / (pi * AR * e))
-  const ar = state.aircraftType === 'glider' ? 15.0 : 7.5;
-  const cd0 = 0.025 + (state.flaps / 40) * 0.06;
+  const ar = isGlider ? 15.0 : 7.5;
+  const cd0 = 0.025 + (state.flaps / 40) * (isGlider ? 0.12 : 0.06);
   const cdi = (cl * cl) / (Math.PI * ar * 0.85);
   let cd = cd0 + cdi;
   if (isStalled) {
@@ -61,14 +70,25 @@ export const AerodynamicsLab: React.FC = () => {
 
   const ldRatio = cd > 0 ? (cl / cd).toFixed(1) : '0';
 
+  // Air density from pressure altitude (ISA troposphere). KIAS is what the
+  // pilot reads on the dial; TAS is what the wing actually feels.
+  const airDensity = 1.225 * Math.pow(Math.max(0.01, 1 - 2.2558e-5 * altitudeFt * 0.3048), 4.2559);
+  const rhoSlug = airDensity * 0.00194032; // kg/m^3 → slugs/ft^3
+  const vFps = state.airspeed * 1.68781; // KIAS to ft/s
+  const tasFps = vFps / Math.sqrt(rhoSlug / 0.0023769); // TAS from IAS via density ratio
+  const tasKts = Math.round(tasFps / 1.68781);
+  const dynamicPressure = 0.5 * rhoSlug * tasFps * tasFps;
+
   // Dynamic Lift & Drag in lbs (assuming nominal wing area)
   // S = 214 sq ft for 2-33A glider, 174 sq ft for C172
-  const wingArea = state.aircraftType === 'glider' ? 214 : 174;
-  const vFps = state.airspeed * 1.68781; // knots to ft/s
-  const rhoSlug = 0.0023769; // slugs/cu ft at sea level
-  const dynamicPressure = 0.5 * rhoSlug * (vFps * vFps);
+  const wingArea = isGlider ? 214 : 174;
   const liftLbs = Math.round(dynamicPressure * wingArea * cl);
   const dragLbs = Math.round(dynamicPressure * wingArea * cd);
+
+  // Live snapshot for the canvas loop (read inside render() so the animation
+  // effect never needs to be torn down when sliders move)
+  const liveRef = useRef({ state, isStalled, isNearStall, criticalAoA, cl, cd, isGlider });
+  liveRef.current = { state, isStalled, isNearStall, criticalAoA, cl, cd, isGlider };
 
   // Audio stall horn trigger
   useEffect(() => {
@@ -111,6 +131,14 @@ export const AerodynamicsLab: React.FC = () => {
     }
 
     const render = () => {
+      // Read the latest sim values every frame — the effect itself never re-runs.
+      const state = liveRef.current.state;
+      const isStalled = liveRef.current.isStalled;
+      const isNearStall = liveRef.current.isNearStall;
+      const criticalAoA = liveRef.current.criticalAoA;
+      const isGlider = liveRef.current.isGlider;
+      const cl = liveRef.current.cl;
+      const cd = liveRef.current.cd;
       ctx.fillStyle = '#060a12';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -135,7 +163,9 @@ export const AerodynamicsLab: React.FC = () => {
       const cx = canvas.width * 0.45;
       const cy = canvas.height * 0.52;
       const chord = 260; // chord length in pixels
-      // Positive Angle of Attack rotates the leading edge UP (counter-clockwise on screen, i.e., positive pitch/climb attitude)
+      // Positive Angle of Attack rotates the leading edge UP. AoA is the angle
+      // between the chord line and the RELATIVE AIRFLOW — it is not pitch
+      // attitude and not climb angle.
       const aoaRad = (state.angleOfAttack * Math.PI) / 180;
       const leX = -chord * 0.25;
       const teX = chord * 0.75;
@@ -219,9 +249,10 @@ export const AerodynamicsLab: React.FC = () => {
           yc = m * chord * ((1 - xPercent) / ((1 - p) * (1 - p))) * (1 + xPercent - 2 * p);
         }
 
-        // Flap deflection on aft 30% of chord
+        // Flap deflection on aft 30% of chord (C172 only — the 2-33A has
+        // spoilers instead, drawn separately below)
         let flapOffset = 0;
-        if (xPercent > 0.7) {
+        if (!isGlider && xPercent > 0.7) {
           const flapFraction = (xPercent - 0.7) / 0.3;
           flapOffset = Math.sin((state.flaps * Math.PI) / 180) * flapFraction * 35;
         }
@@ -267,6 +298,28 @@ export const AerodynamicsLab: React.FC = () => {
       ctx.arc(cpLocalX, 0, 5.5, 0, Math.PI * 2);
       ctx.fill();
 
+      // 2-33A dive spoilers: plates rising from the upper wing surface.
+      // Unlike flaps, spoilers DESTROY lift and add drag (steeper descent).
+      if (isGlider && state.flaps > 0) {
+        const spoilerH = (state.flaps / 40) * 52;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 1.5;
+        [0.5, 0.66].forEach((xp) => {
+          const idx = Math.round(xp * points);
+          const sx = upperCoords[idx][0];
+          const sy = upperCoords[idx][1];
+          ctx.beginPath();
+          ctx.rect(sx - 7, sy - spoilerH, 14, spoilerH);
+          ctx.fill();
+          ctx.stroke();
+        });
+        ctx.fillStyle = '#f59e0b';
+        ctx.font = 'bold 10px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('SPOILERS UP — LIFT DESTROYED', chord * 0.18, -spoilerH - 58);
+      }
+
       ctx.restore();
 
       // In Screen Space: Relative Wind Stream & Flight Attitude Banner
@@ -277,25 +330,28 @@ export const AerodynamicsLab: React.FC = () => {
       ctx.textAlign = 'left';
       ctx.fillText(`RELATIVE WIND ➔➔➔ (${state.airspeed} KIAS)`, 24, canvas.height - 24);
 
-      // Pitch Attitude Indicator at top-left
-      const pitchDesc = isStalled 
-        ? '⚠️ CLIMBING STALL' 
-        : state.angleOfAttack > 6 
-        ? `▲ CLIMBING ATTITUDE (+${state.angleOfAttack}°)` 
-        : state.angleOfAttack >= 1 
-        ? `◆ LEVEL FLIGHT (+${state.angleOfAttack}°)` 
-        : `▼ DIVING ATTITUDE (${state.angleOfAttack}°)`;
-      const pitchBg = isStalled ? 'rgba(220, 38, 38, 0.85)' : state.angleOfAttack > 6 ? 'rgba(2, 132, 199, 0.85)' : state.angleOfAttack < 0 ? 'rgba(217, 119, 6, 0.85)' : 'rgba(16, 185, 129, 0.85)';
-      
-      ctx.fillStyle = pitchBg;
-      ctx.fillRect(24, 24, 240, 28);
+      // Angle-of-Attack status banner (top-left). AoA is the angle between the
+      // chord line and the relative airflow — NOT pitch attitude, NOT climb angle.
+      const aoaDesc = isStalled
+        ? `⚠️ STALL — AoA ${state.angleOfAttack}° EXCEEDS CRITICAL ${criticalAoA.toFixed(0)}°`
+        : isNearStall
+        ? `⚠ NEAR STALL — AoA ${state.angleOfAttack}° (CRIT ${criticalAoA.toFixed(0)}°)`
+        : `AoA ${state.angleOfAttack}° — AIRFLOW ATTACHED`;
+      const aoaBg = isStalled
+        ? 'rgba(220, 38, 38, 0.85)'
+        : isNearStall
+        ? 'rgba(217, 119, 6, 0.85)'
+        : 'rgba(16, 185, 129, 0.85)';
+
+      ctx.fillStyle = aoaBg;
+      ctx.fillRect(24, 24, 300, 28);
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 1;
-      ctx.strokeRect(24, 24, 240, 28);
+      ctx.strokeRect(24, 24, 300, 28);
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 12px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(pitchDesc, 144, 42);
+      ctx.fillText(aoaDesc, 174, 42);
       ctx.restore();
 
       // Flow streamlines / particle trails
@@ -467,7 +523,7 @@ export const AerodynamicsLab: React.FC = () => {
     return () => {
       cancelAnimationFrame(animId);
     };
-  }, [state, isStalled, isNearStall, criticalAoA, cl, cd, liftLbs, dragLbs]);
+  }, []); // never re-created: render() reads liveRef.current every frame
 
   return (
     <div className="space-y-6">
@@ -547,13 +603,13 @@ export const AerodynamicsLab: React.FC = () => {
                 <span>TUNNEL ACTIVE</span>
               </span>
               <span className="text-slate-400 font-mono">
-                AIR DENSITY: <strong className="text-slate-200">{state.airDensity} kg/m³</strong> (ISA MSL)
+                DENSITY: <strong className="text-slate-200">{airDensity.toFixed(3)} kg/m³</strong> ({altitudeFt.toLocaleString()} FT)
               </span>
             </div>
 
             <div className="flex items-center space-x-4 font-mono text-slate-300">
               <span>AoA: <strong className={isStalled ? 'text-rose-400' : 'text-rcac-sky'}>{state.angleOfAttack}°</strong></span>
-              <span>AIRSPEED: <strong className="text-amber-400">{state.airspeed} KIAS</strong></span>
+              <span>AIRSPEED: <strong className="text-amber-400">{state.airspeed} KIAS / {tasKts} KTAS</strong></span>
               <span>L/D RATIO: <strong className="text-emerald-400">{ldRatio}:1</strong></span>
             </div>
           </div>
@@ -583,7 +639,7 @@ export const AerodynamicsLab: React.FC = () => {
           {/* Quick Attitude Presets & Demonstrations */}
           <div className="bg-slate-950 px-4 py-2.5 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2">
             <span className="text-[11px] font-mono text-slate-400 font-semibold flex items-center gap-1.5">
-              <span>✈️ ATTITUDE CONTROLS & PRESETS:</span>
+              <span>✈️ ANGLE OF ATTACK (α) CONTROLS & PRESETS:</span>
             </span>
             <div className="flex flex-wrap items-center gap-1.5 text-xs font-mono">
               <button
@@ -593,9 +649,9 @@ export const AerodynamicsLab: React.FC = () => {
                   soundManager.playClick();
                 }}
                 className="px-2.5 py-1 rounded bg-sky-950/70 hover:bg-sky-900 border border-sky-600/50 text-sky-200 font-bold active:scale-95 transition cursor-pointer"
-                title="Pitch nose up to increase Angle of Attack"
+                title="Increase angle of attack — the angle between the chord line and the relative airflow"
               >
-                ▲ Pitch Up (+2°)
+                ▲ AoA +2°
               </button>
               <button
                 type="button"
@@ -604,9 +660,9 @@ export const AerodynamicsLab: React.FC = () => {
                   soundManager.playClick();
                 }}
                 className="px-2.5 py-1 rounded bg-amber-950/70 hover:bg-amber-900 border border-amber-600/50 text-amber-200 font-bold active:scale-95 transition cursor-pointer"
-                title="Pitch nose down to decrease Angle of Attack"
+                title="Decrease angle of attack — the angle between the chord line and the relative airflow"
               >
-                ▼ Pitch Down (-2°)
+                ▼ AoA −2°
               </button>
               <div className="w-px h-5 bg-slate-800 mx-1" />
               <button
@@ -619,7 +675,7 @@ export const AerodynamicsLab: React.FC = () => {
                   state.angleOfAttack === 4 ? 'bg-rcac-blue border-rcac-sky text-white font-bold' : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white'
                 }`}
               >
-                Level Flight (4°)
+                Cruise AoA (4°)
               </button>
               <button
                 type="button"
@@ -631,7 +687,7 @@ export const AerodynamicsLab: React.FC = () => {
                   state.angleOfAttack === 10 ? 'bg-rcac-blue border-rcac-sky text-white font-bold' : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white'
                 }`}
               >
-                Climbing Attitude (10°)
+                High AoA (10°)
               </button>
               <button
                 type="button"
@@ -643,7 +699,7 @@ export const AerodynamicsLab: React.FC = () => {
                   state.angleOfAttack === 20 ? 'bg-rose-600 border-rose-400 text-white shadow-lg animate-pulse font-bold' : 'bg-rose-950/60 border-rose-800/60 text-rose-300 hover:text-white'
                 }`}
               >
-                ⚠️ Demonstrate Climbing Stall (20°)
+                ⚠️ Stall Demo (20°)
               </button>
               <button
                 type="button"
@@ -655,13 +711,13 @@ export const AerodynamicsLab: React.FC = () => {
                   state.angleOfAttack === -6 ? 'bg-amber-600 border-amber-400 text-slate-950 font-bold' : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white'
                 }`}
               >
-                Diving Attitude (-6°)
+                Negative AoA (−6°)
               </button>
             </div>
           </div>
 
           {/* Interactive Aerodynamic Parameter Sliders */}
-          <div className="bg-slate-950/90 p-5 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
+          <div className="bg-slate-950/90 p-5 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-5">
             {/* Angle of Attack */}
             <div className="space-y-2">
               <div className="flex justify-between items-center text-xs">
@@ -669,9 +725,10 @@ export const AerodynamicsLab: React.FC = () => {
                   <Compass className="w-3.5 h-3.5 text-rcac-sky" /> Angle of Attack (α)
                 </span>
                 <span className={`font-mono font-bold px-1.5 py-0.5 rounded ${isStalled ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-800 text-rcac-sky'}`}>
-                  {state.angleOfAttack}° {state.angleOfAttack > 0 ? '(Pitch Up / Climb)' : state.angleOfAttack < 0 ? '(Pitch Down / Dive)' : '(Level)'}
+                  {state.angleOfAttack}° α
                 </span>
               </div>
+              <p className="-mt-1 text-[10px] text-slate-500">Angle between the chord line and the relative airflow — not pitch attitude.</p>
               <input
                 type="range"
                 min="-8"
@@ -682,9 +739,9 @@ export const AerodynamicsLab: React.FC = () => {
                 className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-rcac-sky"
               />
               <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                <span>-8° (Dive)</span>
+                <span>-8°</span>
                 <span>0°</span>
-                <span className="text-sky-400">10° (Climb)</span>
+                <span className="text-sky-400">10°</span>
                 <span className="text-amber-500">{criticalAoA.toFixed(0)}° (Stall)</span>
                 <span>26°</span>
               </div>
@@ -716,16 +773,21 @@ export const AerodynamicsLab: React.FC = () => {
               </div>
             </div>
 
-            {/* Flap Setting */}
+            {/* Flap / Spoiler Setting — different devices per aircraft */}
             <div className="space-y-2">
               <div className="flex justify-between items-center text-xs">
                 <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-                  <Sliders className="w-3.5 h-3.5 text-emerald-400" /> Flaps / Airbrakes
+                  <Sliders className="w-3.5 h-3.5 text-emerald-400" /> {isGlider ? 'Spoilers / Dive Brakes' : 'Flaps'}
                 </span>
                 <span className="font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-emerald-400">
                   {state.flaps}°
                 </span>
               </div>
+              <p className="-mt-1 text-[10px] text-slate-500">
+                {isGlider
+                  ? '2-33A spoilers DESTROY lift and add drag — a steeper descent, the opposite of flaps.'
+                  : 'C172 flaps ADD lift and drag, and lower the stall speed.'}
+              </p>
               <input
                 type="range"
                 min="0"
@@ -770,6 +832,33 @@ export const AerodynamicsLab: React.FC = () => {
                 <span>3% (Clark Y)</span>
                 <span>6% (High Lift)</span>
               </div>
+            </div>
+
+            {/* Pressure Altitude → Air Density */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-center text-xs">
+                <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-cyan-400" /> Pressure Altitude
+                </span>
+                <span className="font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-cyan-400">
+                  {altitudeFt.toLocaleString()} ft
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="12000"
+                step="500"
+                value={altitudeFt}
+                onChange={(e) => setAltitudeFt(parseInt(e.target.value))}
+                className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400"
+              />
+              <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                <span>0 (MSL)</span>
+                <span>ρ {airDensity.toFixed(3)} kg/m³</span>
+                <span>{tasKts} KTAS</span>
+              </div>
+              <p className="text-[10px] text-slate-500">Thinner air at altitude: the wing feels TAS, the dial reads KIAS.</p>
             </div>
           </div>
         </div>
@@ -831,9 +920,7 @@ export const AerodynamicsLab: React.FC = () => {
                   <span className="text-rcac-sky font-bold">{ldRatio} : 1</span>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  {state.aircraftType === 'glider'
-                    ? 'Glides 23 feet forward for every 1 foot of altitude lost.'
-                    : 'Glides 9 feet forward for every 1 foot of altitude lost.'}
+                  At this AoA and configuration: {ldRatio} ft forward per 1 ft of altitude lost. (Best ≈ {isGlider ? '23:1' : '9:1'} clean.)
                 </p>
               </div>
             </div>
@@ -896,19 +983,26 @@ export const AerodynamicsLab: React.FC = () => {
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
                 <h4 className="font-bold text-rcac-sky mb-1">1. Bernoulli’s Principle of Pressure</h4>
                 <p>
-                  As the velocity of a fluid (or air) increases, the internal pressure decreases. Because the upper camber of an airfoil is curved, oncoming air accelerates over the top surface compared to the lower surface. This creates a low-pressure area above the wing, producing upward suction (Lift).
+                  As the velocity of a fluid (or air) increases, the static pressure decreases. Because the upper camber of an airfoil is curved, oncoming air accelerates over the top surface compared to the lower surface. This creates a low-pressure area above the wing, producing upward suction (Lift).
                 </p>
               </div>
 
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                <h4 className="font-bold text-emerald-400 mb-1">2. Newton’s Third Law of Motion</h4>
+                <h4 className="font-bold text-sky-400 mb-1">2. Angle of Attack ≠ Pitch Attitude</h4>
+                <p>
+                  Angle of attack is the angle between the <strong>chord line</strong> and the <strong>relative airflow</strong> — it is not how nose-high the aircraft looks, and not the climb angle. A glider can be in a steep <em>descending</em> attitude at a high angle of attack (slow, nose-high on final), and an aircraft can be <em>climbing</em> at a low angle of attack (fast climb). The wing only cares about the airflow it meets. That is why an aircraft can stall at any airspeed and in any attitude: exceed the critical angle of attack and the wing stalls, period.
+                </p>
+              </div>
+
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <h4 className="font-bold text-emerald-400 mb-1">3. Newton’s Third Law of Motion</h4>
                 <p>
                   For every action, there is an equal and opposite reaction. As the wing moves through the air with a positive angle of attack, it deflects oncoming air downward (downwash). The reaction force pushes the wing upward and backward.
                 </p>
               </div>
 
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                <h4 className="font-bold text-rose-400 mb-1">3. The Critical Angle of Attack & Stall</h4>
+                <h4 className="font-bold text-rose-400 mb-1">4. The Critical Angle of Attack & Stall</h4>
                 <p>
                   A stall is NOT an engine failure—it occurs when the <strong>Angle of Attack exceeds the critical angle</strong> (~16° for most trainer airfoils). Beyond this angle, the airflow can no longer adhere smoothly to the upper surface; the boundary layer separates violently into turbulent vortices, lift rapidly collapses, and induced drag spikes.
                 </p>
@@ -919,9 +1013,19 @@ export const AerodynamicsLab: React.FC = () => {
               </div>
 
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                <h4 className="font-bold text-rcac-gold mb-1">4. Schweizer SGS 2-33A Cadet Glider Operations</h4>
+                <h4 className="font-bold text-rcac-gold mb-1">5. Schweizer SGS 2-33A Cadet Glider Operations</h4>
                 <p>
                   The workhorse of the Air Cadet Gliding Program (ACGP). Made of welded steel-tube fuselage with aluminum-skinned wings. Cadets practice thermal soaring, tow launch behind the Bellanca Scout towplane, circuit planning, and steep slip approaches using upper/lower wing dive spoilers.
+                </p>
+                <p className="mt-2 text-xs text-slate-400">
+                  <strong className="text-slate-300">Flaps vs. spoilers — opposites.</strong> The C172's flaps hinge down at the trailing edge: more lift, more drag, lower stall speed. The 2-33A's spoilers rise from the upper wing: they <em>destroy</em> lift and add drag for a steeper descent, with little change to stall speed. Try both in the lab above and watch CL move in opposite directions.
+                </p>
+              </div>
+
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <h4 className="font-bold text-slate-300 mb-1">6. About this lab's numbers</h4>
+                <p className="text-xs text-slate-400">
+                  Stall angles, lift/drag curves, and forces in this wind tunnel are an <strong>illustrative teaching model</strong> — they show how the concepts behave, but they are not the 2-33A or C172 flight-manual values. Always use the aircraft's approved flight manual and current weight-and-balance report for real flying.
                 </p>
               </div>
             </div>
