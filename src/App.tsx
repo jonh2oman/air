@@ -33,7 +33,7 @@ export const App: React.FC = () => {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className={`flex-1 w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 ${currentModule === 'flight-sim' ? 'max-w-[1560px]' : 'max-w-7xl'}`}>
         {currentModule === 'aerodynamics' && <AerodynamicsLab />}
         {currentModule === 'flight-controls' && <FlightControls3D />}
         {currentModule === 'instruments' && <SixPackCockpit />}

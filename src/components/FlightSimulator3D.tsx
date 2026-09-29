@@ -1178,15 +1178,24 @@ export const FlightSimulator3D: React.FC = () => {
       if (!containerRef.current) return;
       const w = containerRef.current.clientWidth;
       const h = containerRef.current.clientHeight;
+      if (w === 0 || h === 0) return;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     };
     window.addEventListener('resize', handleResize);
 
+    const resizeObserver = new ResizeObserver(() => {
+      handleResize();
+    });
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
     return () => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
       soundManager.setStallHorn(false);
       renderer.dispose();
       if (containerRef.current && renderer.domElement) {
@@ -1309,415 +1318,430 @@ export const FlightSimulator3D: React.FC = () => {
         </div>
       </div>
 
-      {/* Main 3D Simulator Viewport with Heads-Up Display (HUD) */}
-      <div className="relative w-full h-[620px] bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl">
-        {/* Three.js Canvas Container */}
-        <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
-
-        {/* Visible notice when the 3D model fails to load (procedural backup in use) */}
-        {modelLoadError && (
-          <div className="absolute top-0 inset-x-0 z-10 bg-amber-500/95 text-slate-950 text-[11px] font-mono font-semibold px-4 py-1.5 flex items-center justify-center gap-2">
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-            <span>{modelLoadError}</span>
-          </div>
-        )}
-
+      {/* Cockpit Workstation: Left Controls | Active 3D Flight Window | Right Controls */}
+      <div className="flex flex-col lg:flex-row items-stretch gap-4">
         {/* ======================================================== */}
-        {/* HEADS-UP DISPLAY (HUD) FLIGHT OVERLAY */}
+        {/* LEFT COLUMN: Flight Stick & Primary Attitude Controls */}
         {/* ======================================================== */}
-        <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
-          {/* Top Bar: Heading Compass & PAPI Lights Indicator */}
-          <div className="flex items-start justify-between">
-            {/* Airspeed Gauge Tape (Left) */}
-            <div className="bg-slate-950/80 backdrop-blur-md px-3 py-2 rounded-xl border border-slate-700 text-center min-w-[90px]">
-              <span className="text-[10px] text-slate-400 font-mono uppercase block">AIRSPEED</span>
-              <span className="text-2xl font-bold font-mono text-emerald-400">
-                {telemetry.airspeed}
-              </span>
-              <span className="text-[10px] text-slate-400 font-mono block">KIAS</span>
-            </div>
-
-            {/* Heading Tape & PAPI Lights (Center) */}
-            <div className="flex flex-col items-center gap-1.5">
-              <div className="bg-slate-950/80 backdrop-blur-md px-4 py-1.5 rounded-lg border border-slate-700 text-center font-mono">
-                <span className="text-xs text-slate-400">HDG: </span>
-                <span className="text-base font-bold text-white tracking-widest">
-                  {String(telemetry.headingDeg).padStart(3, '0')}°
-                </span>
-              </div>
-
-              {/* Working PAPI Lights Indicator (only shown when established on final) */}
-              {papiVisible && (
-              <div className="bg-slate-950/85 backdrop-blur-md px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-2">
-                <span className="text-[10px] text-slate-400 font-mono">PAPI GLIDE PATH:</span>
-                <div className="flex items-center gap-1.5">
-                  {papiLights.map((isWhite, idx) => (
-                    <span
-                      key={idx}
-                      className={`w-3.5 h-3.5 rounded-full border border-black/40 shadow-sm transition-colors duration-200 ${
-                        isWhite ? 'bg-white shadow-[0_0_8px_#ffffff]' : 'bg-red-600 shadow-[0_0_8px_#ef4444]'
-                      }`}
-                    />
-                  ))}
-                </div>
-                <span className="text-[10px] font-mono text-slate-300">
-                  {papiLights.filter(Boolean).length === 2 
-                    ? '(3° ON PATH)' 
-                    : papiLights.filter(Boolean).length > 2 
-                    ? '(HIGH)' 
-                    : '(LOW)'}
-                </span>
-              </div>
-              )}
-            </div>
-
-            {/* Altimeter Gauge Tape (Right) */}
-            <div className="bg-slate-950/80 backdrop-blur-md px-3 py-2 rounded-xl border border-slate-700 text-center min-w-[90px]">
-              <span className="text-[10px] text-slate-400 font-mono uppercase block">ALTITUDE</span>
-              <span className="text-2xl font-bold font-mono text-sky-400">
-                {telemetry.altitudeFt}
-              </span>
-              <span className="text-[10px] text-slate-400 font-mono block">FT AGL</span>
-            </div>
-          </div>
-
-          {/* Center Crosshairs & Pitch Ladder */}
-          <div className="relative flex items-center justify-center">
-            {/* Pitch Ladder Line */}
-            <div className="w-32 h-0.5 bg-emerald-500/50 flex items-center justify-between">
-              <div className="w-3 h-2 border-l-2 border-emerald-400" />
-              <div className="w-3 h-3 rounded-full border border-emerald-400 flex items-center justify-center">
-                <div className="w-1 h-1 bg-emerald-400 rounded-full" />
-              </div>
-              <div className="w-3 h-2 border-r-2 border-emerald-400" />
-            </div>
-
-            {/* Stall Warning Alert Banner */}
-            {telemetry.stallWarning && (
-              <div className="absolute -top-12 bg-rose-600/90 text-white font-mono font-bold px-4 py-1.5 rounded-lg border-2 border-white animate-bounce shadow-2xl flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-amber-300" />
-                <span>{aircraftType === 'glider' ? 'STALL WARNING! LOWER THE NOSE' : 'STALL WARNING! LOWER NOSE / FULL POWER'}</span>
-              </div>
-            )}
-
-            {/* Touchdown Landing Score Banner */}
-            {telemetry.landingFeedback && (
-              <div className="absolute -top-16 bg-slate-950/95 border-2 border-rcac-gold px-5 py-2.5 rounded-xl shadow-2xl text-center">
-                <p className="text-sm font-bold font-mono text-rcac-gold">
-                  {telemetry.landingFeedback}
-                </p>
-                <span className="text-[10px] text-slate-400 font-mono">Press 'R' or click Reset to fly again</span>
-              </div>
-            )}
-          </div>
-
-          {/* Bottom Bar: Engine Throttle, Flaps, VSI & Brakes */}
-          <div className="flex items-end justify-between">
-            {/* Throttle & Flaps */}
-            <div className="bg-slate-950/85 backdrop-blur-md p-3 rounded-xl border border-slate-700 flex items-center gap-4 font-mono text-xs">
-              <div>
-                <span className="text-[10px] text-slate-400 block">THROTTLE</span>
-                <span className="font-bold text-amber-400">{telemetry.throttle}%</span>
-              </div>
-              <div className="h-6 w-px bg-slate-800" />
-              <div>
-                <span className="text-[10px] text-slate-400 block">{aircraftType === 'glider' ? 'SPOILERS' : 'FLAPS'}</span>
-                <span className="font-bold text-sky-400">{telemetry.flaps}°</span>
-              </div>
-              <div className="h-6 w-px bg-slate-800" />
-              <div>
-                <span className="text-[10px] text-slate-400 block">BRAKES</span>
-                <span className={`font-bold ${telemetry.brakes ? 'text-rose-400' : 'text-slate-500'}`}>
-                  {telemetry.brakes ? 'ON' : 'OFF'}
-                </span>
-              </div>
-            </div>
-
-            {/* VSI (Vertical Speed Indicator) */}
-            <div className="bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded-xl border border-slate-700 text-center font-mono">
-              <span className="text-[10px] text-slate-400 block">VSI (VERTICAL SPEED)</span>
-              <span className={`text-base font-bold ${telemetry.vsiFpm >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {telemetry.vsiFpm > 0 ? `+${telemetry.vsiFpm}` : telemetry.vsiFpm} fpm
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Flight Controls Dashboard (Keyboard Guide & Touch Controls) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* On-screen Flight Stick (Touch/Mouse) */}
-        <div 
-          className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl flex flex-col items-center select-none"
-          style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
-        >
-          <div className="flex items-center justify-between w-full mb-2">
-            <span className="text-xs font-semibold text-slate-300 font-mono">FLIGHT STICK</span>
-            <span className="text-[10px] font-mono text-rcac-gold px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/40">
-              {stickOffset.y > 6 
-                ? `PULL BACK ${Math.round((stickOffset.y / 44) * 100)}%` 
-                : stickOffset.y < -6 
-                ? `PUSH DIVE ${Math.round((-stickOffset.y / 44) * 100)}%` 
-                : Math.abs(stickOffset.x) > 6
-                ? `${stickOffset.x > 0 ? 'BANK R' : 'BANK L'} ${Math.round((Math.abs(stickOffset.x) / 44) * 100)}%`
-                : 'NEUTRAL'}
-            </span>
-          </div>
-
-          {/* Interactive Virtual Joystick Circle with Pointer Capture & No-Selection */}
+        <div className="w-full lg:w-64 xl:w-72 shrink-0 flex flex-col gap-3">
+          {/* On-screen Flight Stick (Touch/Mouse) */}
           <div 
-            className="w-36 h-36 bg-slate-950 rounded-full border-2 border-slate-700 relative overflow-hidden touch-none cursor-grab active:cursor-grabbing shadow-inner select-none"
-            style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
-            onPointerDown={handleStickPointerDown}
+            className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-xl flex flex-col items-center select-none"
+            style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
           >
-            {/* Crosshair guide lines */}
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="w-full h-px bg-slate-800/80" />
+            <div className="flex items-center justify-between w-full mb-2">
+              <span className="text-xs font-semibold text-slate-300 font-mono">FLIGHT STICK</span>
+              <span className="text-[10px] font-mono text-rcac-gold px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/40">
+                {stickOffset.y > 6 
+                  ? `PULL BACK ${Math.round((stickOffset.y / 44) * 100)}%` 
+                  : stickOffset.y < -6 
+                  ? `PUSH DIVE ${Math.round((-stickOffset.y / 44) * 100)}%` 
+                  : Math.abs(stickOffset.x) > 6
+                  ? `${stickOffset.x > 0 ? 'BANK R' : 'BANK L'} ${Math.round((Math.abs(stickOffset.x) / 44) * 100)}%`
+                  : 'NEUTRAL'}
+              </span>
             </div>
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="h-full w-px bg-slate-800/80" />
-            </div>
-            {/* Outer limit ring */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 rounded-full border border-slate-800/60 pointer-events-none" />
 
-            {/* Moving Stick Knob */}
+            {/* Interactive Virtual Joystick Circle with Pointer Capture & No-Selection */}
             <div 
-              className="absolute top-1/2 left-1/2 w-11 h-11 rounded-full bg-gradient-to-b from-sky-400 to-rcac-blue border-2 border-rcac-gold shadow-lg flex items-center justify-center text-[10px] text-white font-bold pointer-events-none transition-transform duration-75 select-none"
-              style={{
-                transform: `translate(calc(-50% + ${stickOffset.x}px), calc(-50% + ${stickOffset.y}px))`,
-                boxShadow: '0 0 14px rgba(56, 189, 248, 0.55)'
-              }}
+              className="w-36 h-36 bg-slate-950 rounded-full border-2 border-slate-700 relative overflow-hidden touch-none cursor-grab active:cursor-grabbing shadow-inner select-none"
+              style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+              onPointerDown={handleStickPointerDown}
             >
-              STICK
+              {/* Crosshair guide lines */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-full h-px bg-slate-800/80" />
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="h-full w-px bg-slate-800/80" />
+              </div>
+              {/* Outer limit ring */}
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 rounded-full border border-slate-800/60 pointer-events-none" />
+
+              {/* Moving Stick Knob */}
+              <div 
+                className="absolute top-1/2 left-1/2 w-11 h-11 rounded-full bg-gradient-to-b from-sky-400 to-rcac-blue border-2 border-rcac-gold shadow-lg flex items-center justify-center text-[10px] text-white font-bold pointer-events-none transition-transform duration-75 select-none"
+                style={{
+                  transform: `translate(calc(-50% + ${stickOffset.x}px), calc(-50% + ${stickOffset.y}px))`,
+                  boxShadow: '0 0 14px rgba(56, 189, 248, 0.55)'
+                }}
+              >
+                STICK
+              </div>
             </div>
-          </div>
 
-          {/* Dedicated Directional Pitch & Roll Buttons */}
-          <div className="w-full mt-3 space-y-1.5 font-mono text-xs select-none">
-            {/* Pull Back (Climb / Rotate) Button */}
-            <button
-              type="button"
-              onPointerDown={(e) => {
-                e.preventDefault();
-                controlInputs.current.pitchInput = 1.0; // Positive = Nose UP (climb / rotate)
-                setStickOffset((prev) => ({ ...prev, y: 44 }));
-              }}
-              onPointerUp={(e) => {
-                e.preventDefault();
-                controlInputs.current.pitchInput = 0;
-                setStickOffset((prev) => ({ ...prev, y: 0 }));
-              }}
-              onPointerLeave={() => {
-                controlInputs.current.pitchInput = 0;
-                setStickOffset((prev) => ({ ...prev, y: 0 }));
-              }}
-              className="w-full py-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-bold rounded-lg border border-amber-400/60 shadow-md active:scale-95 transition flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <span>▲ PULL BACK (CLIMB / ROTATE)</span>
-            </button>
-
-            {/* Left / Center / Right */}
-            <div className="grid grid-cols-3 gap-1 text-[11px]">
+            {/* Dedicated Directional Pitch & Roll Buttons */}
+            <div className="w-full mt-3 space-y-1.5 font-mono text-xs select-none">
+              {/* Pull Back (Climb / Rotate) Button */}
               <button
                 type="button"
                 onPointerDown={(e) => {
                   e.preventDefault();
-                  controlInputs.current.rollInput = -1.0; // Bank Left
-                  setStickOffset((prev) => ({ ...prev, x: -44 }));
+                  controlInputs.current.pitchInput = 1.0; // Positive = Nose UP (climb / rotate)
+                  setStickOffset((prev) => ({ ...prev, y: 44 }));
                 }}
                 onPointerUp={(e) => {
                   e.preventDefault();
-                  controlInputs.current.rollInput = 0;
-                  setStickOffset((prev) => ({ ...prev, x: 0 }));
-                }}
-                onPointerLeave={() => {
-                  controlInputs.current.rollInput = 0;
-                  setStickOffset((prev) => ({ ...prev, x: 0 }));
-                }}
-                className="py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded text-slate-300 font-bold active:bg-rcac-blue active:text-white cursor-pointer"
-              >
-                ◀ Bank L
-              </button>
-              <button
-                type="button"
-                onClick={() => {
                   controlInputs.current.pitchInput = 0;
-                  controlInputs.current.rollInput = 0;
-                  setStickOffset({ x: 0, y: 0 });
+                  setStickOffset((prev) => ({ ...prev, y: 0 }));
                 }}
-                className="py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-slate-300 font-bold cursor-pointer"
+                onPointerLeave={() => {
+                  controlInputs.current.pitchInput = 0;
+                  setStickOffset((prev) => ({ ...prev, y: 0 }));
+                }}
+                className="w-full py-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-bold rounded-lg border border-amber-400/60 shadow-md active:scale-95 transition flex items-center justify-center gap-1.5 cursor-pointer"
               >
-                Center
+                <span>▲ PULL BACK (CLIMB / ROTATE)</span>
               </button>
+
+              {/* Left / Center / Right */}
+              <div className="grid grid-cols-3 gap-1 text-[11px]">
+                <button
+                  type="button"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    controlInputs.current.rollInput = -1.0; // Bank Left
+                    setStickOffset((prev) => ({ ...prev, x: -44 }));
+                  }}
+                  onPointerUp={(e) => {
+                    e.preventDefault();
+                    controlInputs.current.rollInput = 0;
+                    setStickOffset((prev) => ({ ...prev, x: 0 }));
+                  }}
+                  onPointerLeave={() => {
+                    controlInputs.current.rollInput = 0;
+                    setStickOffset((prev) => ({ ...prev, x: 0 }));
+                  }}
+                  className="py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded text-slate-300 font-bold active:bg-rcac-blue active:text-white cursor-pointer"
+                >
+                  ◀ Bank L
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    controlInputs.current.pitchInput = 0;
+                    controlInputs.current.rollInput = 0;
+                    setStickOffset({ x: 0, y: 0 });
+                  }}
+                  className="py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-slate-300 font-bold cursor-pointer"
+                >
+                  Center
+                </button>
+                <button
+                  type="button"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    controlInputs.current.rollInput = 1.0; // Bank Right
+                    setStickOffset((prev) => ({ ...prev, x: 44 }));
+                  }}
+                  onPointerUp={(e) => {
+                    e.preventDefault();
+                    controlInputs.current.rollInput = 0;
+                    setStickOffset((prev) => ({ ...prev, x: 0 }));
+                  }}
+                  onPointerLeave={() => {
+                    controlInputs.current.rollInput = 0;
+                    setStickOffset((prev) => ({ ...prev, x: 0 }));
+                  }}
+                  className="py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded text-slate-300 font-bold active:bg-rcac-blue active:text-white cursor-pointer"
+                >
+                  Bank R ▶
+                </button>
+              </div>
+
+              {/* Push Forward (Dive) Button */}
               <button
                 type="button"
                 onPointerDown={(e) => {
                   e.preventDefault();
-                  controlInputs.current.rollInput = 1.0; // Bank Right
-                  setStickOffset((prev) => ({ ...prev, x: 44 }));
+                  controlInputs.current.pitchInput = -1.0; // Negative = Nose DOWN (dive)
+                  setStickOffset((prev) => ({ ...prev, y: -44 }));
                 }}
                 onPointerUp={(e) => {
                   e.preventDefault();
-                  controlInputs.current.rollInput = 0;
-                  setStickOffset((prev) => ({ ...prev, x: 0 }));
+                  controlInputs.current.pitchInput = 0;
+                  setStickOffset((prev) => ({ ...prev, y: 0 }));
                 }}
                 onPointerLeave={() => {
-                  controlInputs.current.rollInput = 0;
-                  setStickOffset((prev) => ({ ...prev, x: 0 }));
+                  controlInputs.current.pitchInput = 0;
+                  setStickOffset((prev) => ({ ...prev, y: 0 }));
                 }}
-                className="py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded text-slate-300 font-bold active:bg-rcac-blue active:text-white cursor-pointer"
+                className="w-full py-1.5 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 rounded-lg active:scale-95 transition flex items-center justify-center gap-1 cursor-pointer"
               >
-                Bank R ▶
+                <span>▼ PUSH FORWARD (DIVE)</span>
               </button>
             </div>
+          </div>
 
-            {/* Push Forward (Dive) Button */}
-            <button
-              type="button"
-              onPointerDown={(e) => {
-                e.preventDefault();
-                controlInputs.current.pitchInput = -1.0; // Negative = Nose DOWN (dive)
-                setStickOffset((prev) => ({ ...prev, y: -44 }));
-              }}
-              onPointerUp={(e) => {
-                e.preventDefault();
-                controlInputs.current.pitchInput = 0;
-                setStickOffset((prev) => ({ ...prev, y: 0 }));
-              }}
-              onPointerLeave={() => {
-                controlInputs.current.pitchInput = 0;
-                setStickOffset((prev) => ({ ...prev, y: 0 }));
-              }}
-              className="w-full py-1.5 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 rounded-lg active:scale-95 transition flex items-center justify-center gap-1 cursor-pointer"
-            >
-              <span>▼ PUSH FORWARD (DIVE)</span>
-            </button>
+          {/* Quick Attitude & Touch Tip Card */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 shadow-md text-slate-400 text-[11px] font-mono leading-relaxed">
+            <span className="text-rcac-gold font-bold block mb-1">🎮 FLIGHT ATTITUDE:</span>
+            Drag joystick or hold buttons. At 55 KIAS on takeoff, pull back gently to rotate.
           </div>
         </div>
 
-        {/* Throttle & Rudder Pedals */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl flex flex-col justify-between">
-          <span className="text-xs font-semibold text-slate-300 font-mono mb-2">POWER & RUDDER</span>
-          
-          <div className="space-y-3">
-            <div>
-              <div className="flex justify-between text-xs font-mono text-slate-400 mb-1">
-                <span>Throttle:</span>
-                <span className="text-amber-400 font-bold">{telemetry.throttle}%</span>
+        {/* ======================================================== */}
+        {/* CENTER COLUMN: Main 3D Simulator Viewport with HUD */}
+        {/* ======================================================== */}
+        <div className="w-full lg:flex-1 min-w-0">
+          <div className="relative w-full h-[520px] xl:h-[560px] bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl">
+            {/* Three.js Canvas Container */}
+            <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+
+            {/* Visible notice when the 3D model fails to load (procedural backup in use) */}
+            {modelLoadError && (
+              <div className="absolute top-0 inset-x-0 z-10 bg-amber-500/95 text-slate-950 text-[11px] font-mono font-semibold px-4 py-1.5 flex items-center justify-center gap-2">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span>{modelLoadError}</span>
               </div>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="5"
-                value={telemetry.throttle}
-                onChange={(e) => {
-                  controlInputs.current.throttleInput = Number(e.target.value);
-                  setTelemetry((prev) => ({ ...prev, throttle: Number(e.target.value) }));
+            )}
+
+            {/* HEADS-UP DISPLAY (HUD) FLIGHT OVERLAY */}
+            <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
+              {/* Top Bar: Heading Compass & PAPI Lights Indicator */}
+              <div className="flex items-start justify-between">
+                {/* Airspeed Gauge Tape (Left) */}
+                <div className="bg-slate-950/80 backdrop-blur-md px-3 py-2 rounded-xl border border-slate-700 text-center min-w-[85px]">
+                  <span className="text-[10px] text-slate-400 font-mono uppercase block">AIRSPEED</span>
+                  <span className="text-2xl font-bold font-mono text-emerald-400">
+                    {telemetry.airspeed}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono block">KIAS</span>
+                </div>
+
+                {/* Heading Tape & PAPI Lights (Center) */}
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className="bg-slate-950/80 backdrop-blur-md px-4 py-1.5 rounded-lg border border-slate-700 text-center font-mono">
+                    <span className="text-xs text-slate-400">HDG: </span>
+                    <span className="text-base font-bold text-white tracking-widest">
+                      {String(telemetry.headingDeg).padStart(3, '0')}°
+                    </span>
+                  </div>
+
+                  {/* Working PAPI Lights Indicator (only shown when established on final) */}
+                  {papiVisible && (
+                    <div className="bg-slate-950/85 backdrop-blur-md px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 font-mono">PAPI GLIDE PATH:</span>
+                      <div className="flex items-center gap-1.5">
+                        {papiLights.map((isWhite, idx) => (
+                          <span
+                            key={idx}
+                            className={`w-3.5 h-3.5 rounded-full border border-black/40 shadow-sm transition-colors duration-200 ${
+                              isWhite ? 'bg-white shadow-[0_0_8px_#ffffff]' : 'bg-red-600 shadow-[0_0_8px_#ef4444]'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-300">
+                        {papiLights.filter(Boolean).length === 2 
+                          ? '(3° ON PATH)' 
+                          : papiLights.filter(Boolean).length > 2 
+                          ? '(HIGH)' 
+                          : '(LOW)'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Altimeter Gauge Tape (Right) */}
+                <div className="bg-slate-950/80 backdrop-blur-md px-3 py-2 rounded-xl border border-slate-700 text-center min-w-[85px]">
+                  <span className="text-[10px] text-slate-400 font-mono uppercase block">ALTITUDE</span>
+                  <span className="text-2xl font-bold font-mono text-sky-400">
+                    {telemetry.altitudeFt}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono block">FT AGL</span>
+                </div>
+              </div>
+
+              {/* Center Crosshairs & Pitch Ladder */}
+              <div className="relative flex items-center justify-center">
+                {/* Pitch Ladder Line */}
+                <div className="w-32 h-0.5 bg-emerald-500/50 flex items-center justify-between">
+                  <div className="w-3 h-2 border-l-2 border-emerald-400" />
+                  <div className="w-3 h-3 rounded-full border border-emerald-400 flex items-center justify-center">
+                    <div className="w-1 h-1 bg-emerald-400 rounded-full" />
+                  </div>
+                  <div className="w-3 h-2 border-r-2 border-emerald-400" />
+                </div>
+
+                {/* Stall Warning Alert Banner */}
+                {telemetry.stallWarning && (
+                  <div className="absolute -top-12 bg-rose-600/90 text-white font-mono font-bold px-4 py-1.5 rounded-lg border-2 border-white animate-bounce shadow-2xl flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-amber-300" />
+                    <span>{aircraftType === 'glider' ? 'STALL WARNING! LOWER THE NOSE' : 'STALL WARNING! LOWER NOSE / FULL POWER'}</span>
+                  </div>
+                )}
+
+                {/* Touchdown Landing Score Banner */}
+                {telemetry.landingFeedback && (
+                  <div className="absolute -top-16 bg-slate-950/95 border-2 border-rcac-gold px-5 py-2.5 rounded-xl shadow-2xl text-center">
+                    <p className="text-sm font-bold font-mono text-rcac-gold">
+                      {telemetry.landingFeedback}
+                    </p>
+                    <span className="text-[10px] text-slate-400 font-mono">Press 'R' or click Reset to fly again</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Bottom Bar: Engine Throttle, Flaps, VSI & Brakes */}
+              <div className="flex items-end justify-between">
+                {/* Throttle & Flaps */}
+                <div className="bg-slate-950/85 backdrop-blur-md p-2.5 rounded-xl border border-slate-700 flex items-center gap-3.5 font-mono text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">THROTTLE</span>
+                    <span className="font-bold text-amber-400">{telemetry.throttle}%</span>
+                  </div>
+                  <div className="h-6 w-px bg-slate-800" />
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">{aircraftType === 'glider' ? 'SPOILERS' : 'FLAPS'}</span>
+                    <span className="font-bold text-sky-400">{telemetry.flaps}°</span>
+                  </div>
+                  <div className="h-6 w-px bg-slate-800" />
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">BRAKES</span>
+                    <span className={`font-bold ${telemetry.brakes ? 'text-rose-400' : 'text-slate-500'}`}>
+                      {telemetry.brakes ? 'ON' : 'OFF'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* VSI (Vertical Speed Indicator) */}
+                <div className="bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded-xl border border-slate-700 text-center font-mono">
+                  <span className="text-[10px] text-slate-400 block">VSI (VERTICAL SPEED)</span>
+                  <span className={`text-base font-bold ${telemetry.vsiFpm >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {telemetry.vsiFpm > 0 ? `+${telemetry.vsiFpm}` : telemetry.vsiFpm} fpm
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ======================================================== */}
+        {/* RIGHT COLUMN: Power, Rudder & Key Reference Guide */}
+        {/* ======================================================== */}
+        <div className="w-full lg:w-72 xl:w-80 shrink-0 flex flex-col gap-3">
+          {/* Throttle & Rudder Pedals */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-xl flex flex-col justify-between">
+            <span className="text-xs font-semibold text-slate-300 font-mono mb-2">POWER & RUDDER</span>
+            
+            <div className="space-y-3">
+              <div>
+                <div className="flex justify-between text-xs font-mono text-slate-400 mb-1">
+                  <span>Throttle:</span>
+                  <span className="text-amber-400 font-bold">{telemetry.throttle}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="5"
+                  value={telemetry.throttle}
+                  onChange={(e) => {
+                    controlInputs.current.throttleInput = Number(e.target.value);
+                    setTelemetry((prev) => ({ ...prev, throttle: Number(e.target.value) }));
+                  }}
+                  className="w-full accent-amber-400"
+                />
+              </div>
+
+              {/* Rudder Buttons */}
+              <div>
+                <span className="text-[11px] text-slate-400 font-mono block mb-1">Rudder Pedals (Yaw):</span>
+                <div className="grid grid-cols-2 gap-2 font-mono text-xs">
+                  <button
+                    type="button"
+                    onPointerDown={(e) => { e.preventDefault(); controlInputs.current.yawInput = -1.0; }}
+                    onPointerUp={(e) => { e.preventDefault(); controlInputs.current.yawInput = 0; }}
+                    onPointerLeave={() => { controlInputs.current.yawInput = 0; }}
+                    className="py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded text-slate-300 font-bold active:bg-rcac-blue active:text-white cursor-pointer"
+                  >
+                    ◀ Left (Q)
+                  </button>
+                  <button
+                    type="button"
+                    onPointerDown={(e) => { e.preventDefault(); controlInputs.current.yawInput = 1.0; }}
+                    onPointerUp={(e) => { e.preventDefault(); controlInputs.current.yawInput = 0; }}
+                    onPointerLeave={() => { controlInputs.current.yawInput = 0; }}
+                    className="py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded text-slate-300 font-bold active:bg-rcac-blue active:text-white cursor-pointer"
+                  >
+                    Right (E) ▶
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 mt-3 font-mono text-xs">
+              <button
+                onClick={() => {
+                  const nextFlaps = telemetry.flaps >= 30 ? 0 : telemetry.flaps + 10;
+                  simState.current.flaps = nextFlaps;
+                  setTelemetry((p) => ({ ...p, flaps: nextFlaps }));
+                  soundManager.playClick();
                 }}
-                className="w-full accent-amber-400"
-              />
+                className="py-2 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded border border-slate-700 font-bold text-center"
+              >
+                Flaps (F): {telemetry.flaps}°
+              </button>
+              <button
+                onPointerDown={() => {
+                  controlInputs.current.brakes = true;
+                  simState.current.brakes = true;
+                  setTelemetry((p) => ({ ...p, brakes: true }));
+                }}
+                onPointerUp={() => {
+                  controlInputs.current.brakes = false;
+                  simState.current.brakes = false;
+                  setTelemetry((p) => ({ ...p, brakes: false }));
+                }}
+                className={`py-2 rounded border font-bold transition text-center ${
+                  telemetry.brakes 
+                    ? 'bg-rose-600 text-white border-rose-500' 
+                    : 'bg-slate-950 text-slate-300 border-slate-800'
+                }`}
+              >
+                Brakes (B)
+              </button>
             </div>
+          </div>
 
-            {/* Rudder Buttons */}
-            <div>
-              <span className="text-[11px] text-slate-400 font-mono block mb-1">Rudder Pedals (Yaw):</span>
-              <div className="grid grid-cols-2 gap-2 font-mono text-xs">
-                <button
-                  type="button"
-                  onPointerDown={(e) => { e.preventDefault(); controlInputs.current.yawInput = -1.0; }}
-                  onPointerUp={(e) => { e.preventDefault(); controlInputs.current.yawInput = 0; }}
-                  onPointerLeave={() => { controlInputs.current.yawInput = 0; }}
-                  className="py-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded text-slate-300 font-bold active:bg-rcac-blue active:text-white cursor-pointer"
-                >
-                  ◀ Left Rudder (Q)
-                </button>
-                <button
-                  type="button"
-                  onPointerDown={(e) => { e.preventDefault(); controlInputs.current.yawInput = 1.0; }}
-                  onPointerUp={(e) => { e.preventDefault(); controlInputs.current.yawInput = 0; }}
-                  onPointerLeave={() => { controlInputs.current.yawInput = 0; }}
-                  className="py-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded text-slate-300 font-bold active:bg-rcac-blue active:text-white cursor-pointer"
-                >
-                  Right Rudder (E) ▶
-                </button>
+          {/* Flight Keys Quick Reference Card */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-xl">
+            <span className="text-xs font-semibold text-slate-300 font-mono mb-2 block flex items-center gap-1.5">
+              <Info className="w-3.5 h-3.5 text-rcac-sky" />
+              <span>KEYBOARD CONTROLS</span>
+            </span>
+
+            <div className="space-y-1.5 text-[11px] font-mono text-slate-400">
+              <div className="flex justify-between py-0.5 border-b border-slate-800/80">
+                <span className="text-slate-300">Pitch (Elevator):</span>
+                <span className="text-rcac-gold font-bold">↑ / ↓ (or W / S)</span>
               </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 mt-3 font-mono text-xs">
-            <button
-              onClick={() => {
-                const nextFlaps = telemetry.flaps >= 30 ? 0 : telemetry.flaps + 10;
-                simState.current.flaps = nextFlaps;
-                setTelemetry((p) => ({ ...p, flaps: nextFlaps }));
-                soundManager.playClick();
-              }}
-              className="py-2 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded border border-slate-700 font-bold"
-            >
-              Cycle Flaps (F): {telemetry.flaps}°
-            </button>
-            <button
-              onPointerDown={() => {
-                controlInputs.current.brakes = true;
-                simState.current.brakes = true;
-                setTelemetry((p) => ({ ...p, brakes: true }));
-              }}
-              onPointerUp={() => {
-                controlInputs.current.brakes = false;
-                simState.current.brakes = false;
-                setTelemetry((p) => ({ ...p, brakes: false }));
-              }}
-              className={`py-2 rounded border font-bold transition ${
-                telemetry.brakes 
-                  ? 'bg-rose-600 text-white border-rose-500' 
-                  : 'bg-slate-950 text-slate-300 border-slate-800'
-              }`}
-            >
-              Wheel Brakes (B)
-            </button>
-          </div>
-        </div>
-
-        {/* Flight Keys Quick Reference Card */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl">
-          <span className="text-xs font-semibold text-slate-300 font-mono mb-2 block flex items-center gap-1.5">
-            <Info className="w-3.5 h-3.5 text-rcac-sky" />
-            <span>CADET FLIGHT SIMULATOR CONTROLS</span>
-          </span>
-
-          <div className="space-y-1.5 text-[11px] font-mono text-slate-400">
-            <div className="flex justify-between py-0.5 border-b border-slate-800/80">
-              <span className="text-slate-300">Elevator (Pitch Up/Down):</span>
-              <span className="text-rcac-gold font-bold">Arrow Up / Down (or W / S)</span>
-            </div>
-            <div className="flex justify-between py-0.5 border-b border-slate-800/80">
-              <span className="text-slate-300">Ailerons (Bank Left/Right):</span>
-              <span className="text-rcac-gold font-bold">Arrow Left / Right (or A / D)</span>
-            </div>
-            <div className="flex justify-between py-0.5 border-b border-slate-800/80">
-              <span className="text-slate-300">Rudder (Yaw Left/Right):</span>
-              <span className="text-rcac-gold font-bold">Q / E</span>
-            </div>
-            <div className="flex justify-between py-0.5 border-b border-slate-800/80">
-              <span className="text-slate-300">Throttle Up / Down:</span>
-              <span className="text-rcac-gold font-bold">Shift / Ctrl</span>
-            </div>
-            <div className="flex justify-between py-0.5 border-b border-slate-800/80">
-              <span className="text-slate-300">Flaps / Airbrakes:</span>
-              <span className="text-rcac-gold font-bold">F</span>
-            </div>
-            <div className="flex justify-between py-0.5 border-b border-slate-800/80">
-              <span className="text-slate-300">Wheel Brakes:</span>
-              <span className="text-rcac-gold font-bold">B or Spacebar</span>
-            </div>
-            <div className="flex justify-between py-0.5">
-              <span className="text-slate-300">Switch Camera / Reset:</span>
-              <span className="text-rcac-gold font-bold">C / R</span>
+              <div className="flex justify-between py-0.5 border-b border-slate-800/80">
+                <span className="text-slate-300">Bank (Ailerons):</span>
+                <span className="text-rcac-gold font-bold">← / → (or A / D)</span>
+              </div>
+              <div className="flex justify-between py-0.5 border-b border-slate-800/80">
+                <span className="text-slate-300">Yaw (Rudder):</span>
+                <span className="text-rcac-gold font-bold">Q / E</span>
+              </div>
+              <div className="flex justify-between py-0.5 border-b border-slate-800/80">
+                <span className="text-slate-300">Throttle:</span>
+                <span className="text-rcac-gold font-bold">Shift / Ctrl</span>
+              </div>
+              <div className="flex justify-between py-0.5 border-b border-slate-800/80">
+                <span className="text-slate-300">Flaps / Brakes:</span>
+                <span className="text-rcac-gold font-bold">F / B (or Space)</span>
+              </div>
+              <div className="flex justify-between py-0.5">
+                <span className="text-slate-300">Camera / Reset:</span>
+                <span className="text-rcac-gold font-bold">C / R</span>
+              </div>
             </div>
           </div>
         </div>
       </div>
+
     </div>
   );
 };
