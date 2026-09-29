@@ -158,7 +158,8 @@ export const FlightSimulator3D: React.FC = () => {
     } catch {}
 
     const rect = pad.getBoundingClientRect();
-    const maxRadius = rect.width / 2 - 20;
+    const knobRadius = 22; // w-11 knob (44px diameter)
+    const maxRadius = Math.max(10, (rect.width / 2) - knobRadius - 6); // 44px max travel distance
 
     const updateFromCoords = (clientX: number, clientY: number) => {
       const cx = rect.left + rect.width / 2;
@@ -363,13 +364,13 @@ export const FlightSimulator3D: React.FC = () => {
         case 'a':
         case 'A':
           controlInputs.current.rollInput = -1.0; // Bank Left
-          setStickOffset((prev) => ({ ...prev, x: -40 }));
+          setStickOffset((prev) => ({ ...prev, x: -44 }));
           break;
         case 'ArrowRight':
         case 'd':
         case 'D':
           controlInputs.current.rollInput = 1.0; // Bank Right
-          setStickOffset((prev) => ({ ...prev, x: 40 }));
+          setStickOffset((prev) => ({ ...prev, x: 44 }));
           break;
         case 'q':
         case 'Q':
@@ -1454,16 +1455,18 @@ export const FlightSimulator3D: React.FC = () => {
             <span className="text-xs font-semibold text-slate-300 font-mono">FLIGHT STICK</span>
             <span className="text-[10px] font-mono text-rcac-gold px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/40">
               {stickOffset.y > 6 
-                ? `PULL BACK ${Math.round((stickOffset.y / 48) * 100)}%` 
+                ? `PULL BACK ${Math.round((stickOffset.y / 44) * 100)}%` 
                 : stickOffset.y < -6 
-                ? `PUSH DIVE ${Math.round((-stickOffset.y / 48) * 100)}%` 
+                ? `PUSH DIVE ${Math.round((-stickOffset.y / 44) * 100)}%` 
+                : Math.abs(stickOffset.x) > 6
+                ? `${stickOffset.x > 0 ? 'BANK R' : 'BANK L'} ${Math.round((Math.abs(stickOffset.x) / 44) * 100)}%`
                 : 'NEUTRAL'}
             </span>
           </div>
 
           {/* Interactive Virtual Joystick Circle with Pointer Capture & No-Selection */}
           <div 
-            className="w-36 h-36 bg-slate-950 rounded-full border-2 border-slate-700 relative flex items-center justify-center touch-none cursor-grab active:cursor-grabbing shadow-inner select-none"
+            className="w-36 h-36 bg-slate-950 rounded-full border-2 border-slate-700 relative overflow-hidden touch-none cursor-grab active:cursor-grabbing shadow-inner select-none"
             style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
             onPointerDown={handleStickPointerDown}
           >
@@ -1475,14 +1478,14 @@ export const FlightSimulator3D: React.FC = () => {
               <div className="h-full w-px bg-slate-800/80" />
             </div>
             {/* Outer limit ring */}
-            <div className="w-28 h-28 rounded-full border border-slate-800/60 pointer-events-none" />
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 rounded-full border border-slate-800/60 pointer-events-none" />
 
             {/* Moving Stick Knob */}
             <div 
-              className="w-12 h-12 rounded-full bg-gradient-to-b from-sky-400 to-rcac-blue border-2 border-rcac-gold shadow-lg flex items-center justify-center text-[10px] text-white font-bold pointer-events-none transition-transform duration-75"
+              className="absolute top-1/2 left-1/2 w-11 h-11 rounded-full bg-gradient-to-b from-sky-400 to-rcac-blue border-2 border-rcac-gold shadow-lg flex items-center justify-center text-[10px] text-white font-bold pointer-events-none transition-transform duration-75 select-none"
               style={{
-                transform: `translate(${stickOffset.x}px, ${stickOffset.y}px)`,
-                boxShadow: '0 0 15px rgba(56, 189, 248, 0.5)'
+                transform: `translate(calc(-50% + ${stickOffset.x}px), calc(-50% + ${stickOffset.y}px))`,
+                boxShadow: '0 0 14px rgba(56, 189, 248, 0.55)'
               }}
             >
               STICK
@@ -1520,7 +1523,7 @@ export const FlightSimulator3D: React.FC = () => {
                 onPointerDown={(e) => {
                   e.preventDefault();
                   controlInputs.current.rollInput = -1.0; // Bank Left
-                  setStickOffset((prev) => ({ ...prev, x: -40 }));
+                  setStickOffset((prev) => ({ ...prev, x: -44 }));
                 }}
                 onPointerUp={(e) => {
                   e.preventDefault();
@@ -1551,7 +1554,7 @@ export const FlightSimulator3D: React.FC = () => {
                 onPointerDown={(e) => {
                   e.preventDefault();
                   controlInputs.current.rollInput = 1.0; // Bank Right
-                  setStickOffset((prev) => ({ ...prev, x: 40 }));
+                  setStickOffset((prev) => ({ ...prev, x: 44 }));
                 }}
                 onPointerUp={(e) => {
                   e.preventDefault();
