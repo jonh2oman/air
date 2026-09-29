@@ -57,6 +57,14 @@ export const FlightSimulator3D: React.FC = () => {
   const [cameraMode, setCameraMode] = useState<CameraMode>('chase');
   const [isSimRunning, setIsSimRunning] = useState<boolean>(true);
 
+  // Synchronization refs for animate loop so scene does not unmount on camera or scenario change
+  const cameraModeRef = useRef(cameraMode);
+  cameraModeRef.current = cameraMode;
+  const isSimRunningRef = useRef(isSimRunning);
+  isSimRunningRef.current = isSimRunning;
+  const scenarioRef = useRef(scenario);
+  scenarioRef.current = scenario;
+
   // Flight Physics Telemetry for UI
   const [telemetry, setTelemetry] = useState<FlightState>({
     x: 0,
@@ -230,27 +238,31 @@ export const FlightSimulator3D: React.FC = () => {
       };
       controlInputs.current.throttleInput = 0;
     } else if (scen === 'landing') {
-      // True 3 NM final on a 3° glide path to the touchdown point (Z = 700):
-      // 3 NM = 5556 m → Z = 700 + 5556 = 6256; height = 5556 × tan(3°) ≈ 291 m ≈ 955 ft AGL
-      // Speed 65 knots (~33.4 m/s); 3° sink ≈ 1.75 m/s (~344 fpm)
+      // 3-Mile Final Approach to Runway 27
+      // Runway 27 threshold is at Z = 1000, touchdown aiming point at Z = 700.
+      // Position aircraft on extended centerline at Z = 3000 (2000m from threshold, 2300m from touchdown).
+      // On a 3° glide slope: altitude = 2300 * tan(3°) ≈ 121m (~397 ft AGL).
+      // Speed: 65 knots (33.4 m/s) with 20° flaps; 3° sink rate: -1.75 m/s (-344 fpm).
+      // Throttle: 55% for C172 to hold steady 65 KIAS on the glide slope without decelerating into a stall.
+      const isGliderPlane = type === 'glider';
       newState = {
         x: 0,
-        y: 291,
-        z: 6256,
+        y: isGliderPlane ? 145 : 121,
+        z: isGliderPlane ? 2400 : 3000,
         vx: 0,
         vy: -1.75,
-        vz: -33.4,
-        pitch: 0.035, // Flared attitude (~2 deg nose up) with 20 deg flaps
+        vz: isGliderPlane ? -25.7 : -33.4,
+        pitch: isGliderPlane ? -0.01 : 0.04, // Trimmed pitch attitude (~2.3° nose up for C172)
         roll: 0,
-        yaw: 0,
+        yaw: 0, // Heading 270 (facing -Z straight down Runway 27)
         pitchRate: 0,
         rollRate: 0,
         yawRate: 0,
-        throttle: 45,
-        flaps: 20,
+        throttle: isGliderPlane ? 0 : 55,
+        flaps: isGliderPlane ? 15 : 20,
         brakes: false,
-        airspeed: 65,
-        altitudeFt: 955,
+        airspeed: isGliderPlane ? 50 : 65,
+        altitudeFt: Math.round((isGliderPlane ? 145 : 121) * 3.28084),
         vsiFpm: -344,
         headingDeg: 270,
         stallWarning: false,
@@ -258,7 +270,7 @@ export const FlightSimulator3D: React.FC = () => {
         status: 'flying',
         landingFeedback: null
       };
-      controlInputs.current.throttleInput = 45;
+      controlInputs.current.throttleInput = isGliderPlane ? 0 : 55;
     } else if (scen === 'circuit') {
       // Downwind leg at 1,000 ft AGL (305m), heading 090 (+Z)
       newState = {
@@ -460,7 +472,8 @@ export const FlightSimulator3D: React.FC = () => {
     // 1. Scene, Camera, Renderer
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x7dd3fc); // Daylight Sky Blue
-    scene.fog = new THREE.FogExp2(0x93c5fd, 0.00035);
+    // Linear fog: 100% crystal clear inside 3500m so runway & airfield are prominent from 3 miles out
+    scene.fog = new THREE.Fog(0x7dd3fc, 3500, 16000);
 
     const camera = new THREE.PerspectiveCamera(55, width / height, 0.5, 12000);
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
@@ -558,6 +571,67 @@ export const FlightSimulator3D: React.FC = () => {
     const aim2 = aim1.clone();
     aim2.position.set(10, 0.02, runwayLength / 2 - 300);
     scene.add(aim2);
+
+    // Approach Lighting System (ALS) for Runway 27
+    // Real-world high-intensity approach light system with lead-in light bars & crossbars
+    const alsGroup = new THREE.Group();
+    const alsLightGeo = new THREE.SphereGeometry(0.7, 8, 8);
+    const alsLightMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const alsAmberMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24 });
+    const alsGreenMat = new THREE.MeshBasicMaterial({ color: 0x22c55e });
+    const alsRedMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+
+    // Centerline approach light bars extending from Z = 1030 out to Z = 1650
+    for (let zLight = 1030; zLight <= 1650; zLight += 35) {
+      for (let xOffset = -2.5; xOffset <= 2.5; xOffset += 1.25) {
+        const light = new THREE.Mesh(alsLightGeo, zLight > 1400 ? alsAmberMat : alsLightMat);
+        light.position.set(xOffset, 0.45, zLight);
+        alsGroup.add(light);
+      }
+    }
+
+    // 1000-ft Approach Crossbar at Z = 1300
+    for (let xCross = -15; xCross <= 15; xCross += 2.5) {
+      const crossLight = new THREE.Mesh(alsLightGeo, alsLightMat);
+      crossLight.position.set(xCross, 0.45, 1300);
+      alsGroup.add(crossLight);
+    }
+
+    // Runway 27 Green Threshold Light Bar (at Z = 1000)
+    for (let xThresh = -22; xThresh <= 22; xThresh += 2.2) {
+      const gLight = new THREE.Mesh(alsLightGeo, alsGreenMat);
+      gLight.position.set(xThresh, 0.4, 1000);
+      alsGroup.add(gLight);
+    }
+
+    // Runway 09 End Red Lights (at Z = -1000)
+    for (let xEnd = -22; xEnd <= 22; xEnd += 2.2) {
+      const rLight = new THREE.Mesh(alsLightGeo, alsRedMat);
+      rLight.position.set(xEnd, 0.4, -1000);
+      alsGroup.add(rLight);
+    }
+
+    // Dual-Row Runway Edge Lights along both sides (X = -23.5 and X = +23.5)
+    for (let zEdge = -980; zEdge <= 980; zEdge += 60) {
+      const leftEdge = new THREE.Mesh(alsLightGeo, alsLightMat);
+      leftEdge.position.set(-23.5, 0.35, zEdge);
+      alsGroup.add(leftEdge);
+
+      const rightEdge = new THREE.Mesh(alsLightGeo, alsLightMat);
+      rightEdge.position.set(23.5, 0.35, zEdge);
+      alsGroup.add(rightEdge);
+    }
+
+    // Extended Centerline Visual Guide (Dashed high-contrast lead-in from Z = 1000 out to Z = 3200)
+    const extCenterGeo = new THREE.PlaneGeometry(1.5, 25);
+    const extCenterMat = new THREE.MeshBasicMaterial({ color: 0xfacc15, transparent: true, opacity: 0.9 });
+    for (let zExt = 1050; zExt <= 3150; zExt += 60) {
+      const extDash = new THREE.Mesh(extCenterGeo, extCenterMat);
+      extDash.rotation.x = -Math.PI / 2;
+      extDash.position.set(0, 0.03, zExt);
+      alsGroup.add(extDash);
+    }
+    scene.add(alsGroup);
 
     // 5. PAPI (Precision Approach Path Indicator) 4-Light Array
     // Located at X = -32 (left side of Runway 27 approach), Z = touchdown point (approx 650)
@@ -781,7 +855,7 @@ export const FlightSimulator3D: React.FC = () => {
       const state = simState.current;
       const inputs = controlInputs.current;
 
-      if (isSimRunning) {
+      if (isSimRunningRef.current) {
         // --- 1. AERODYNAMICS & PHYSICS CALCULATION ---
         const isGlider = aircraftType === 'glider';
         const mass = isGlider ? 500 : 1050; // kg
@@ -832,7 +906,7 @@ export const FlightSimulator3D: React.FC = () => {
           const maxThrust = 3200;
           thrust = (inputs.throttleInput / 100) * maxThrust * Math.max(0.3, 1 - airspeedKts / 150);
         } else if (
-          scenario === 'glider-winch' &&
+          scenarioRef.current === 'glider-winch' &&
           state.y < 450 &&
           (state.status === 'flying' || (state.status === 'ready' && state.onGround))
         ) {
@@ -1072,7 +1146,7 @@ export const FlightSimulator3D: React.FC = () => {
         }
 
         // --- 3. CAMERA UPDATE ---
-        if (cameraMode === 'cockpit') {
+        if (cameraModeRef.current === 'cockpit') {
           // Pilot's Eye Cockpit View
           camera.position.set(state.x, state.y + 1.2, state.z);
           camera.rotation.order = 'YXZ';
@@ -1118,7 +1192,7 @@ export const FlightSimulator3D: React.FC = () => {
         containerRef.current.removeChild(renderer.domElement);
       }
     };
-  }, [scenario, aircraftType, cameraMode, isSimRunning]);
+  }, [aircraftType]);
 
   return (
     <div className="space-y-4 select-none">

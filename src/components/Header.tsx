@@ -27,15 +27,15 @@ export const Header: React.FC<HeaderProps> = ({
   soundEnabled,
   onToggleSound,
 }) => {
-  const navItems: Array<{ id: NavModule; label: string; icon: React.ReactNode; short: string }> = [
-    { id: 'aerodynamics', label: '1. Wind Tunnel & Aerodynamics', short: 'Wind Tunnel', icon: <Wind className="w-4 h-4" /> },
-    { id: 'flight-controls', label: '2. 3D Aircraft Controls', short: '3D Controls', icon: <Rotate3d className="w-4 h-4" /> },
-    { id: 'instruments', label: '3. Cockpit Six-Pack', short: 'Six-Pack', icon: <Gauge className="w-4 h-4" /> },
-    { id: 'circuit-radio', label: '4. Airport Circuit & Light Gun', short: 'Circuit & Radio', icon: <Radio className="w-4 h-4" /> },
-    { id: 'weight-balance', label: '5. Weight & Balance', short: 'Weight & Bal', icon: <Scale className="w-4 h-4" /> },
-    { id: 'navigation-e6b', label: '6. E6B & Weather', short: 'E6B & Weather', icon: <Compass className="w-4 h-4" /> },
-    { id: 'flight-sim', label: '7. 3D Flight Simulator', short: 'Flight Sim', icon: <Plane className="w-4 h-4" /> },
-    { id: 'cadet-exam', label: '8. Wings Exam Challenge', short: 'Wings Exam', icon: <Trophy className="w-4 h-4" /> },
+  const navItems: Array<{ id: NavModule; num: number; label: string; fullTitle: string; icon: React.ReactNode }> = [
+    { id: 'aerodynamics', num: 1, label: 'Wind Tunnel', fullTitle: '1. Virtual Wind Tunnel & Aerodynamics', icon: <Wind className="w-3.5 h-3.5" /> },
+    { id: 'flight-controls', num: 2, label: '3D Controls', fullTitle: '2. 3D Aircraft Primary Controls', icon: <Rotate3d className="w-3.5 h-3.5" /> },
+    { id: 'instruments', num: 3, label: 'Six-Pack', fullTitle: '3. Cockpit Six-Pack Flight Instruments', icon: <Gauge className="w-3.5 h-3.5" /> },
+    { id: 'circuit-radio', num: 4, label: 'Circuit & Radio', fullTitle: '4. Airport Circuit Pattern & Light Gun Signals', icon: <Radio className="w-3.5 h-3.5" /> },
+    { id: 'weight-balance', num: 5, label: 'Weight & Bal', fullTitle: '5. Weight & Balance Loading Lab', icon: <Scale className="w-3.5 h-3.5" /> },
+    { id: 'navigation-e6b', num: 6, label: 'E6B Computer', fullTitle: '6. E6B Flight Computer & Weather Calculator', icon: <Compass className="w-3.5 h-3.5" /> },
+    { id: 'flight-sim', num: 7, label: 'Flight Sim', fullTitle: '7. 3D Interactive Flight Simulator', icon: <Plane className="w-3.5 h-3.5" /> },
+    { id: 'cadet-exam', num: 8, label: 'Wings Exam', fullTitle: '8. Cadet Wings Challenge & PSTAR Exam', icon: <Trophy className="w-3.5 h-3.5" /> },
   ];
 
   return (
@@ -78,7 +78,7 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Audio Toggle */}
             <button
               onClick={onToggleSound}
-              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition"
+              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition shadow-sm active:translate-y-0.5"
               title={soundEnabled ? 'Mute Audio' : 'Enable Audio'}
             >
               {soundEnabled ? (
@@ -90,8 +90,8 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <nav className="flex space-x-1 sm:space-x-2 py-2 overflow-x-auto no-scrollbar">
+        {/* Navigation Tabs - Responsive Grid fitting all buttons on screen without scrolling */}
+        <nav className="grid grid-cols-4 md:grid-cols-8 gap-1.5 sm:gap-2 py-2.5 w-full">
           {navItems.map((item) => {
             const isActive = currentModule === item.id;
             return (
@@ -101,15 +101,31 @@ export const Header: React.FC<HeaderProps> = ({
                   onSelectModule(item.id);
                   soundManager.playClick();
                 }}
-                className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                title={item.fullTitle}
+                className={`group flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-semibold transition-all duration-150 shadow-sm select-none active:translate-y-0.5 ${
                   isActive
-                    ? 'bg-rcac-sky text-slate-950 shadow-md font-bold'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                    ? 'bg-rcac-sky text-slate-950 border-2 border-white shadow-lg shadow-sky-500/25 ring-2 ring-sky-400/50 font-bold'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border-2 border-slate-700/80 hover:border-rcac-sky/70 hover:shadow-md'
                 }`}
               >
-                <span>{item.icon}</span>
-                <span className="hidden sm:inline">{item.label}</span>
-                <span className="inline sm:hidden">{item.short}</span>
+                {/* Number Badge */}
+                <span
+                  className={`w-4 h-4 sm:w-4.5 sm:h-4.5 rounded flex items-center justify-center font-mono text-[10px] font-bold shrink-0 transition-colors ${
+                    isActive
+                      ? 'bg-slate-950 text-rcac-gold border border-rcac-gold/60'
+                      : 'bg-slate-900 text-rcac-sky border border-slate-700/90 group-hover:border-rcac-sky/60'
+                  }`}
+                >
+                  {item.num}
+                </span>
+
+                {/* Icon */}
+                <span className={`shrink-0 ${isActive ? 'text-slate-950' : 'text-rcac-sky group-hover:text-white'}`}>
+                  {item.icon}
+                </span>
+
+                {/* Text Label */}
+                <span className="truncate">{item.label}</span>
               </button>
             );
           })}
